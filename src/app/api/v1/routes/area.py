@@ -19,12 +19,8 @@ def get_area_service(db: AsyncSession = Depends(get_db)) -> AreaService:
     return AreaService(area_repo=AreaRepository(db))
 
 
-@router.post(
-    "",
-    response_model=AreaResponse,
-    status_code=201,
-    dependencies=[Depends(PermissionChecker(Permission.LOCATIONS_MANAGE))],
-)
+@router.post("", response_model=AreaResponse, status_code=201,
+    dependencies=[Depends(PermissionChecker(Permission.LOCATIONS_MANAGE))])
 async def create_area(
     body: AreaCreate, service: AreaService = Depends(get_area_service)
 ):
@@ -36,13 +32,18 @@ async def list_areas(
     page: int = Query(1, ge=1),
     page_size: int = Query(None),
     city_id: uuid.UUID = Query(None),
+    taluka_id: uuid.UUID = Query(None),
+    village_id: uuid.UUID = Query(None),
     service: AreaService = Depends(get_area_service),
     _: bool = Depends(PermissionChecker(Permission.LOCATIONS_VIEW)),
 ):
     skip, limit = get_pagination_params(page, page_size)
-    filters = {"city_id": city_id} if city_id else None
-    items = await service.get_all(skip=skip, limit=limit, filters=filters)
-    total = await service.count(filters=filters)
+    filters = {}
+    if city_id: filters["city_id"] = city_id
+    if taluka_id: filters["taluka_id"] = taluka_id
+    if village_id: filters["village_id"] = village_id
+    items = await service.get_all(skip=skip, limit=limit, filters=filters or None)
+    total = await service.count(filters=filters or None)
     return build_paginated_response(items, total, page, limit)
 
 

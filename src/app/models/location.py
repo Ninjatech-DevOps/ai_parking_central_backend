@@ -11,8 +11,19 @@ class Location(Base, UUIDMixin, TimestampMixin):
 
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     area_id: Mapped["UUID"] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("areas.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("areas.id"), nullable=True
     )
+    # Denormalized ancestor IDs for direct filtering
+    city_id: Mapped["UUID"] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("cities.id"), nullable=True
+    )
+    taluka_id: Mapped["UUID"] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("talukas.id"), nullable=True
+    )
+    village_id: Mapped["UUID"] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("villages.id"), nullable=True
+    )
+
     address: Mapped[str] = mapped_column(String(500), nullable=True)
     latitude: Mapped[float] = mapped_column(Float, nullable=True)
     longitude: Mapped[float] = mapped_column(Float, nullable=True)
@@ -25,5 +36,6 @@ class Location(Base, UUIDMixin, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     area = relationship("Area", back_populates="locations", lazy="selectin")
+    city = relationship("City", lazy="selectin")
     floors = relationship("Floor", back_populates="location", lazy="selectin")
     devices = relationship("Device", back_populates="location", lazy="selectin")

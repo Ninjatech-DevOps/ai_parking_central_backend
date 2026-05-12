@@ -1,5 +1,5 @@
 from sqlalchemy import String, Boolean, ForeignKey, Enum as SAEnum
-from sqlalchemy.dialects.postgresql import UUID, ARRAY
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.app.core.constants import CameraStatus
@@ -19,6 +19,6 @@ class Camera(Base, UUIDMixin, TimestampMixin):
         default=CameraStatus.ACTIVE,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    slot_ids = mapped_column(ARRAY(UUID(as_uuid=True)), nullable=True)
 
     device = relationship("Device", back_populates="cameras", lazy="selectin")
+    slots = relationship("ParkingSlot", back_populates="camera", lazy="selectin")

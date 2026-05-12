@@ -1,8 +1,8 @@
 """initial schema
 
-Revision ID: 43af3a69ab3e
+Revision ID: e879189d5a2e
 Revises: 
-Create Date: 2026-05-09 12:18:45.227907
+Create Date: 2026-05-09 21:26:44.401418
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '43af3a69ab3e'
+revision: str = 'e879189d5a2e'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -173,7 +173,10 @@ def upgrade() -> None:
     )
     op.create_table('locations',
     sa.Column('name', sa.String(length=200), nullable=False),
-    sa.Column('area_id', sa.UUID(), nullable=False),
+    sa.Column('area_id', sa.UUID(), nullable=True),
+    sa.Column('city_id', sa.UUID(), nullable=True),
+    sa.Column('taluka_id', sa.UUID(), nullable=True),
+    sa.Column('village_id', sa.UUID(), nullable=True),
     sa.Column('address', sa.String(length=500), nullable=True),
     sa.Column('latitude', sa.Float(), nullable=True),
     sa.Column('longitude', sa.Float(), nullable=True),
@@ -184,6 +187,9 @@ def upgrade() -> None:
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.ForeignKeyConstraint(['area_id'], ['areas.id'], ),
+    sa.ForeignKeyConstraint(['city_id'], ['cities.id'], ),
+    sa.ForeignKeyConstraint(['taluka_id'], ['talukas.id'], ),
+    sa.ForeignKeyConstraint(['village_id'], ['villages.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('floors',
@@ -211,6 +217,7 @@ def upgrade() -> None:
     sa.Column('device_id', sa.String(length=50), nullable=False),
     sa.Column('location_id', sa.UUID(), nullable=False),
     sa.Column('zone_id', sa.UUID(), nullable=True),
+    sa.Column('city_id', sa.UUID(), nullable=True),
     sa.Column('status', sa.Enum('ONLINE', 'OFFLINE', 'UPDATING', 'MAINTENANCE', name='device_status_enum'), nullable=False),
     sa.Column('ip_address', sa.String(length=45), nullable=True),
     sa.Column('docker_image_version', sa.String(length=50), nullable=True),
@@ -218,20 +225,11 @@ def upgrade() -> None:
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.ForeignKeyConstraint(['city_id'], ['cities.id'], ),
     sa.ForeignKeyConstraint(['location_id'], ['locations.id'], ),
     sa.ForeignKeyConstraint(['zone_id'], ['zones.id'], ),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('device_id')
-    )
-    op.create_table('parking_slots',
-    sa.Column('label', sa.String(length=20), nullable=False),
-    sa.Column('zone_id', sa.UUID(), nullable=False),
-    sa.Column('state', sa.Enum('VEHICLE', 'EMPTY', 'OBSTRUCTED', name='slot_state_enum'), nullable=False),
-    sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.ForeignKeyConstraint(['zone_id'], ['zones.id'], ),
-    sa.PrimaryKeyConstraint('id')
     )
     op.create_table('alert_events',
     sa.Column('alert_rule_id', sa.UUID(), nullable=False),
@@ -256,7 +254,6 @@ def upgrade() -> None:
     sa.Column('position_label', sa.String(length=50), nullable=False),
     sa.Column('status', sa.Enum('ACTIVE', 'INACTIVE', 'FAILED', name='camera_status_enum'), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=False),
-    sa.Column('slot_ids', postgresql.ARRAY(sa.UUID()), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
@@ -291,17 +288,6 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['device_id'], ['devices.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_table('slot_events',
-    sa.Column('parking_slot_id', sa.UUID(), nullable=False),
-    sa.Column('previous_state', sa.Enum('VEHICLE', 'EMPTY', 'OBSTRUCTED', name='slot_state_enum'), nullable=True),
-    sa.Column('new_state', sa.Enum('VEHICLE', 'EMPTY', 'OBSTRUCTED', name='slot_state_enum'), nullable=False),
-    sa.Column('device_id', sa.UUID(), nullable=True),
-    sa.Column('recorded_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.Column('id', sa.UUID(), nullable=False),
-    sa.ForeignKeyConstraint(['device_id'], ['devices.id'], ),
-    sa.ForeignKeyConstraint(['parking_slot_id'], ['parking_slots.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
     op.create_table('notification_logs',
     sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('alert_event_id', sa.UUID(), nullable=False),
@@ -314,18 +300,45 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('parking_slots',
+    sa.Column('label', sa.String(length=20), nullable=False),
+    sa.Column('zone_id', sa.UUID(), nullable=False),
+    sa.Column('camera_id', sa.UUID(), nullable=True),
+    sa.Column('state', sa.Enum('VEHICLE', 'EMPTY', 'OBSTRUCTED', name='slot_state_enum'), nullable=False),
+    sa.Column('pos_x1', sa.Integer(), nullable=True),
+    sa.Column('pos_y1', sa.Integer(), nullable=True),
+    sa.Column('pos_x2', sa.Integer(), nullable=True),
+    sa.Column('pos_y2', sa.Integer(), nullable=True),
+    sa.Column('id', sa.UUID(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.ForeignKeyConstraint(['camera_id'], ['cameras.id'], ),
+    sa.ForeignKeyConstraint(['zone_id'], ['zones.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('slot_events',
+    sa.Column('parking_slot_id', sa.UUID(), nullable=False),
+    sa.Column('previous_state', sa.Enum('VEHICLE', 'EMPTY', 'OBSTRUCTED', name='slot_state_enum'), nullable=True),
+    sa.Column('new_state', sa.Enum('VEHICLE', 'EMPTY', 'OBSTRUCTED', name='slot_state_enum'), nullable=False),
+    sa.Column('device_id', sa.UUID(), nullable=True),
+    sa.Column('recorded_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('id', sa.UUID(), nullable=False),
+    sa.ForeignKeyConstraint(['device_id'], ['devices.id'], ),
+    sa.ForeignKeyConstraint(['parking_slot_id'], ['parking_slots.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
     # ### end Alembic commands ###
 
 
 def downgrade() -> None:
     # ### commands auto generated by Alembic - please adjust! ###
-    op.drop_table('notification_logs')
     op.drop_table('slot_events')
+    op.drop_table('parking_slots')
+    op.drop_table('notification_logs')
     op.drop_table('device_telemetry')
     op.drop_table('device_commands')
     op.drop_table('cameras')
     op.drop_table('alert_events')
-    op.drop_table('parking_slots')
     op.drop_table('devices')
     op.drop_table('zones')
     op.drop_table('floors')

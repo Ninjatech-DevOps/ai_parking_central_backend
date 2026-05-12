@@ -35,5 +35,8 @@ python -m scripts.seed
 echo "Seeding Gujarat data..."
 python -m scripts.seed_gujarat
 
+echo "Seeding Ahmedabad detail data..."
+python -m scripts.seed_ahmedabad_detail
+
 echo "Starting application..."
 exec uvicorn src.app.main:app --host 0.0.0.0 --port 8000 --reload

@@ -18,6 +18,11 @@ class Device(Base, UUIDMixin, TimestampMixin):
     zone_id: Mapped["UUID"] = mapped_column(
         UUID(as_uuid=True), ForeignKey("zones.id"), nullable=True
     )
+    # Denormalized for direct filtering
+    city_id: Mapped["UUID"] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("cities.id"), nullable=True
+    )
+
     status: Mapped[str] = mapped_column(
         SAEnum(DeviceStatus, name="device_status_enum"),
         nullable=False,

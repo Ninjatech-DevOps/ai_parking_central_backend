@@ -26,14 +26,8 @@ class DeviceResponse(BaseResponse):
     device_id: str
     location_id: uuid.UUID
     zone_id: Optional[uuid.UUID]
+    city_id: Optional[uuid.UUID]
     status: str
     ip_address: Optional[str]
     docker_image_version: Optional[str]
     last_seen: Optional[datetime]
-
-
-class DeviceFilter(BaseSchema):
-    location_id: Optional[uuid.UUID] = None
-    zone_id: Optional[uuid.UUID] = None
-    status: Optional[DeviceStatus] = None
-    device_id: Optional[str] = None
