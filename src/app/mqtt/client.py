@@ -12,11 +12,16 @@ _mqtt_client: mqtt.Client = None
 
 
 def _extract_device_id(topic: str) -> str:
-    """Extract device_id from topic like parking/{lot_id}/{device_id}/slots."""
+    """Extract device_id from topic like parking/{device_id}/slots."""
     parts = topic.split("/")
-    if len(parts) >= 3:
-        return parts[2]
+    if len(parts) >= 2:
+        return parts[1]
     return ""
+
+
+def _topic_suffix(topic: str) -> str:
+    """Extract the last segment of a topic (e.g. 'parking/lot-1/RPi-001/events' → 'events')."""
+    return topic.rsplit("/", 1)[-1]
 
 
 def on_connect(client, userdata, flags, reason_code, properties):
@@ -24,12 +29,27 @@ def on_connect(client, userdata, flags, reason_code, properties):
         logger.info("MQTT connected. Subscribing to topics...")
         client.subscribe([
             (MQTTTopics.ALL_SLOTS, settings.MQTT_QOS),
+            (MQTTTopics.ALL_EVENTS, settings.MQTT_QOS),
             (MQTTTopics.ALL_HEARTBEATS, settings.MQTT_QOS),
+            (MQTTTopics.ALL_STATUS, settings.MQTT_QOS),
             (MQTTTopics.ALL_ALERTS, settings.MQTT_QOS),
             (MQTTTopics.ALL_ACKS, settings.MQTT_QOS),
+            (MQTTTopics.ALL_SYNC, settings.MQTT_QOS),
         ])
     else:
         logger.error("MQTT connect failed: %s", reason_code)
+
+
+_TOPIC_HANDLERS = {
+    "slots": "_handle_slot_snapshot",
+    "events": "_handle_slot_events",
+    "heartbeat": "_handle_heartbeat",
+    "status": "_handle_device_status",
+    "alerts": "_handle_device_alert",
+    "ack": "_handle_ack",
+    "sync/camera": "_handle_sync_camera",
+    "sync/slots": "_handle_sync_slots",
+}
 
 
 def on_message(client, userdata, msg):
@@ -44,14 +64,17 @@ def on_message(client, userdata, msg):
             logger.warning("No device_id in message on %s", topic)
             return
 
-        if "/slots" in topic:
-            _handle_slot_update(device_id, payload)
-        elif "/heartbeat" in topic:
-            _handle_heartbeat(device_id, payload)
-        elif "/alerts" in topic:
-            _handle_device_alert(device_id, payload)
-        elif "/ack" in topic:
-            _handle_ack(device_id, payload)
+        # Sync topics have 2-level suffix: parking/{id}/sync/camera
+        if "/sync/" in topic:
+            sync_type = topic.rsplit("/", 1)[-1]  # "camera" or "slots"
+            handler_name = _TOPIC_HANDLERS.get(f"sync/{sync_type}")
+        else:
+            handler_name = _TOPIC_HANDLERS.get(_topic_suffix(topic))
+
+        if handler_name:
+            globals()[handler_name](device_id, payload)
+        else:
+            logger.warning("Unhandled topic: %s", topic)
 
     except json.JSONDecodeError:
         logger.error("Invalid JSON payload on topic %s", msg.topic)
@@ -59,24 +82,47 @@ def on_message(client, userdata, msg):
         logger.exception("Error processing MQTT message on %s", msg.topic)
 
 
-def _handle_slot_update(device_id: str, payload: dict):
-    """Dispatch slot update to Celery worker."""
+def _handle_slot_snapshot(device_id: str, payload: dict):
+    """Dispatch full slot-state snapshot to Celery worker (reconciliation)."""
     from src.app.tasks.slot_update import process_slot_update
 
     slots = payload.get("slots", [])
     if not slots:
-        logger.warning("Empty slots in message from %s", device_id)
+        logger.warning("Empty slots snapshot from %s", device_id)
         return
 
     process_slot_update.delay(device_id, slots)
-    logger.info("Dispatched slot update from %s (%d slots)", device_id, len(slots))
+    logger.info("Dispatched slot snapshot from %s (%d slots)", device_id, len(slots))
+
+
+def _handle_slot_events(device_id: str, payload: dict):
+    """Dispatch slot change events to Celery worker (real-time diffs)."""
+    from src.app.tasks.slot_event import process_slot_event
+
+    changes = payload.get("changes", [])
+    if not changes:
+        logger.warning("Empty slot events from %s", device_id)
+        return
+
+    camera_id = payload.get("camera_id")
+    process_slot_event.delay(device_id, camera_id, changes)
+    logger.info("Dispatched slot events from %s (%d changes)", device_id, len(changes))
 
 
 def _handle_heartbeat(device_id: str, payload: dict):
-    """Dispatch heartbeat to Celery worker."""
+    """Dispatch heartbeat telemetry to Celery worker."""
     from src.app.tasks.heartbeat import process_heartbeat
 
     process_heartbeat.delay(device_id, payload)
+
+
+def _handle_device_status(device_id: str, payload: dict):
+    """Dispatch device online/offline status to Celery worker."""
+    from src.app.tasks.device_status import process_device_status
+
+    status = payload.get("status", "unknown")
+    process_device_status.delay(device_id, status)
+    logger.info("Device %s status: %s", device_id, status)
 
 
 def _handle_device_alert(device_id: str, payload: dict):
@@ -92,6 +138,27 @@ def _handle_ack(device_id: str, payload: dict):
     from src.app.tasks.command_ack import process_command_ack
 
     process_command_ack.delay(device_id, payload)
+
+
+def _handle_sync_camera(device_id: str, payload: dict):
+    """Dispatch camera config sync to Celery worker."""
+    from src.app.tasks.sync_camera import process_sync_camera
+
+    action = payload.get("action", "upsert")
+    camera = payload.get("camera", {})
+    process_sync_camera.delay(device_id, action, camera)
+    logger.info("Dispatched camera sync from %s: %s %s", device_id, action, camera.get("label"))
+
+
+def _handle_sync_slots(device_id: str, payload: dict):
+    """Dispatch slots config sync to Celery worker."""
+    from src.app.tasks.sync_slots import process_sync_slots
+
+    action = payload.get("action", "upsert")
+    camera_label = payload.get("camera_label", "")
+    slots = payload.get("slots", [])
+    process_sync_slots.delay(device_id, action, camera_label, slots)
+    logger.info("Dispatched slots sync from %s: %s %s (%d slots)", device_id, action, camera_label, len(slots))
 
 
 def get_mqtt_client() -> mqtt.Client:

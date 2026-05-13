@@ -17,3 +17,12 @@ class CameraRepository(BaseRepository[Camera]):
             select(Camera).where(Camera.device_id == device_id)
         )
         return list(result.scalars().all())
+
+    async def get_by_device_and_label(self, device_id: uuid.UUID, label: str):
+        result = await self.db.execute(
+            select(Camera).where(
+                Camera.device_id == device_id,
+                Camera.position_label == label,
+            )
+        )
+        return result.scalars().first()

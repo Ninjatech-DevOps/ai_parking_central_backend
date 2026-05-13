@@ -107,10 +107,12 @@ class CommandStatus(str, enum.Enum):
 
 # MQTT Topic Patterns
 class MQTTTopics:
-    SLOT_STATUS = "parking/{lot_id}/{device_id}/slots"
-    HEARTBEAT = "parking/{lot_id}/{device_id}/heartbeat"
-    DEVICE_ALERT = "parking/{lot_id}/{device_id}/alerts"
-    DEVICE_ACK = "parking/{lot_id}/{device_id}/ack"
+    SLOT_SNAPSHOT = "parking/{device_id}/slots"
+    SLOT_EVENTS = "parking/{device_id}/events"
+    HEARTBEAT = "parking/{device_id}/heartbeat"
+    DEVICE_STATUS = "parking/{device_id}/status"
+    DEVICE_ALERT = "parking/{device_id}/alerts"
+    DEVICE_ACK = "parking/{device_id}/ack"
 
     CMD_RESTART = "cmd/{device_id}/restart"
     CMD_UPDATE = "cmd/{device_id}/update"
@@ -118,11 +120,18 @@ class MQTTTopics:
     CMD_SHELL = "cmd/{device_id}/shell"
     CMD_SNAPSHOT = "cmd/{device_id}/snapshot"
 
+    # Config sync from devices
+    SYNC_CAMERA = "parking/{device_id}/sync/camera"
+    SYNC_SLOTS = "parking/{device_id}/sync/slots"
+
     # Wildcard subscriptions for central server
-    ALL_SLOTS = "parking/+/+/slots"
-    ALL_HEARTBEATS = "parking/+/+/heartbeat"
-    ALL_ALERTS = "parking/+/+/alerts"
-    ALL_ACKS = "parking/+/+/ack"
+    ALL_SLOTS = "parking/+/slots"
+    ALL_EVENTS = "parking/+/events"
+    ALL_HEARTBEATS = "parking/+/heartbeat"
+    ALL_STATUS = "parking/+/status"
+    ALL_ALERTS = "parking/+/alerts"
+    ALL_ACKS = "parking/+/ack"
+    ALL_SYNC = "parking/+/sync/#"
 
 
 # Permissions

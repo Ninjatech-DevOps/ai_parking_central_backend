@@ -15,6 +15,21 @@ class ParkingSlotRepository(BaseRepository[ParkingSlot]):
     def __init__(self, db: AsyncSession):
         super().__init__(ParkingSlot, db)
 
+    async def get_by_camera_id(self, camera_id: uuid.UUID) -> List[ParkingSlot]:
+        result = await self.db.execute(
+            select(ParkingSlot).where(ParkingSlot.camera_id == camera_id)
+        )
+        return list(result.scalars().all())
+
+    async def get_by_zone_and_label(self, zone_id: uuid.UUID, label: str):
+        result = await self.db.execute(
+            select(ParkingSlot).where(
+                ParkingSlot.zone_id == zone_id,
+                ParkingSlot.label == label,
+            )
+        )
+        return result.scalars().first()
+
     async def get_by_zone_id(self, zone_id: uuid.UUID) -> List[ParkingSlot]:
         result = await self.db.execute(
             select(ParkingSlot).where(ParkingSlot.zone_id == zone_id)
