@@ -21,6 +21,15 @@ class ParkingSlotRepository(BaseRepository[ParkingSlot]):
         )
         return list(result.scalars().all())
 
+    async def get_by_camera_and_label(self, camera_id: uuid.UUID, label: str):
+        result = await self.db.execute(
+            select(ParkingSlot).where(
+                ParkingSlot.camera_id == camera_id,
+                ParkingSlot.label == label,
+            )
+        )
+        return result.scalars().first()
+
     async def get_by_zone_and_label(self, zone_id: uuid.UUID, label: str):
         result = await self.db.execute(
             select(ParkingSlot).where(

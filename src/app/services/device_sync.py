@@ -3,7 +3,10 @@
 import logging
 from typing import Dict, List
 
+from sqlalchemy import delete as sa_delete
+
 from src.app.core.constants import CameraStatus, SlotState
+from src.app.models.slot_event import SlotEvent
 from src.app.repositories.device import DeviceRepository
 from src.app.repositories.camera import CameraRepository
 from src.app.repositories.parking_slot import ParkingSlotRepository
@@ -79,7 +82,7 @@ class DeviceSyncService:
 
         for slot_data in slots_data:
             label = slot_data["label"]
-            existing = await self.slot_repo.get_by_zone_and_label(device.zone_id, label)
+            existing = await self.slot_repo.get_by_camera_and_label(camera.id, label)
 
             update_data = {
                 "zone_id": device.zone_id,
@@ -104,6 +107,10 @@ class DeviceSyncService:
         existing_slots = await self.slot_repo.get_by_camera_id(camera.id)
         for slot in existing_slots:
             if slot.label not in incoming_labels:
+                # Delete related slot_events first (FK constraint)
+                await self.slot_repo.db.execute(
+                    sa_delete(SlotEvent).where(SlotEvent.parking_slot_id == slot.id)
+                )
                 await self.slot_repo.delete(slot.id)
 
         logger.info(
