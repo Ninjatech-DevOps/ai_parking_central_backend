@@ -43,10 +43,10 @@ async def list_cameras(
     _: bool = Depends(PermissionChecker(Permission.DEVICES_VIEW)),
 ):
     skip, limit = get_pagination_params(page, page_size)
-    filters = {}
+    filters = {"is_active": True}
     if device_id: filters["device_id"] = device_id
-    items = await service.get_all(skip=skip, limit=limit, filters=filters or None)
-    total = await service.count(filters=filters or None)
+    items = await service.get_all(skip=skip, limit=limit, filters=filters)
+    total = await service.count(filters=filters)
     return build_paginated_response(items, total, page, limit)
 
 

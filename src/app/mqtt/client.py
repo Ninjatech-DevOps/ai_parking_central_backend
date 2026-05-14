@@ -34,6 +34,7 @@ def on_connect(client, userdata, flags, reason_code, properties):
             (MQTTTopics.ALL_STATUS, settings.MQTT_QOS),
             (MQTTTopics.ALL_ALERTS, settings.MQTT_QOS),
             (MQTTTopics.ALL_ACKS, settings.MQTT_QOS),
+            (MQTTTopics.ALL_CMD_RESULTS, settings.MQTT_QOS),
             (MQTTTopics.ALL_SYNC, settings.MQTT_QOS),
         ])
     else:
@@ -47,6 +48,7 @@ _TOPIC_HANDLERS = {
     "status": "_handle_device_status",
     "alerts": "_handle_device_alert",
     "ack": "_handle_ack",
+    "cmd/result": "_handle_cmd_result",
     "sync/camera": "_handle_sync_camera",
     "sync/slots": "_handle_sync_slots",
 }
@@ -64,10 +66,12 @@ def on_message(client, userdata, msg):
             logger.warning("No device_id in message on %s", topic)
             return
 
-        # Sync topics have 2-level suffix: parking/{id}/sync/camera
+        # Multi-level suffix topics: parking/{id}/sync/camera, parking/{id}/cmd/result
         if "/sync/" in topic:
-            sync_type = topic.rsplit("/", 1)[-1]  # "camera" or "slots"
+            sync_type = topic.rsplit("/", 1)[-1]
             handler_name = _TOPIC_HANDLERS.get(f"sync/{sync_type}")
+        elif "/cmd/" in topic:
+            handler_name = _TOPIC_HANDLERS.get("cmd/result")
         else:
             handler_name = _TOPIC_HANDLERS.get(_topic_suffix(topic))
 
@@ -138,6 +142,32 @@ def _handle_ack(device_id: str, payload: dict):
     from src.app.tasks.command_ack import process_command_ack
 
     process_command_ack.delay(device_id, payload)
+
+
+def _handle_cmd_result(device_id: str, payload: dict):
+    """Handle command results (e.g., snapshot image) — save to disk."""
+    import base64
+    import os
+
+    action = payload.get("action")
+    command_id = payload.get("command_id", "")
+
+    if action == "snapshot":
+        image_b64 = payload.get("image_b64")
+        if not image_b64:
+            logger.warning("Snapshot result from %s has no image data", device_id)
+            return
+
+        os.makedirs("data/snapshots", exist_ok=True)
+        camera_label = payload.get("camera_label", "unknown")
+        path = f"data/snapshots/{device_id}_{camera_label}.jpg"
+
+        with open(path, "wb") as f:
+            f.write(base64.b64decode(image_b64))
+
+        logger.info("Snapshot saved: %s (cmd=%s)", path, command_id)
+    else:
+        logger.info("Command result from %s: action=%s", device_id, action)
 
 
 def _handle_sync_camera(device_id: str, payload: dict):

@@ -131,6 +131,7 @@ class MQTTTopics:
     ALL_STATUS = "parking/+/status"
     ALL_ALERTS = "parking/+/alerts"
     ALL_ACKS = "parking/+/ack"
+    ALL_CMD_RESULTS = "parking/+/cmd/result"
     ALL_SYNC = "parking/+/sync/#"
 
 

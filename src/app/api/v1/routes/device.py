@@ -1,7 +1,9 @@
+import os
 import uuid
 from typing import Optional, Set
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.api.deps import PermissionChecker, get_user_location_ids
@@ -81,3 +83,33 @@ async def delete_device(
 ):
     await service.delete(device_uuid)
     return MessageResponse(message="Device deleted successfully")
+
+
+@router.get("/{device_uuid}/snapshot")
+async def get_device_snapshot(
+    device_uuid: uuid.UUID,
+    camera_label: str = Query(None),
+    service: DeviceService = Depends(get_device_service),
+    _: bool = Depends(PermissionChecker(Permission.DEVICES_VIEW)),
+):
+    """Get the latest snapshot for a device (captured via snapshot command)."""
+    device = await service.get(device_uuid)
+
+    # Find matching snapshot file
+    snapshot_dir = "data/snapshots"
+    if camera_label:
+        path = os.path.join(snapshot_dir, f"{device.device_id}_{camera_label}.jpg")
+    else:
+        # Find any snapshot for this device
+        path = None
+        if os.path.isdir(snapshot_dir):
+            for f in sorted(os.listdir(snapshot_dir), reverse=True):
+                if f.startswith(device.device_id) and f.endswith(".jpg"):
+                    path = os.path.join(snapshot_dir, f)
+                    break
+
+    if not path or not os.path.exists(path):
+        from src.app.exceptions.base import NotFoundException
+        raise NotFoundException(detail="No snapshot available. Send a snapshot command first.")
+
+    return FileResponse(path, media_type="image/jpeg")

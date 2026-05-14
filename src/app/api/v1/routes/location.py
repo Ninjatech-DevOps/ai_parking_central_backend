@@ -112,6 +112,8 @@ async def get_canvas_data(
     for device in devices:
         cameras = await cam_repo.get_by_device_id(device.id)
         for cam in cameras:
+            if not cam.is_active:
+                continue
             slots = await slot_repo.get_all(filters={"camera_id": cam.id})
             cameras_data.append(CanvasCamera(
                 id=cam.id,
