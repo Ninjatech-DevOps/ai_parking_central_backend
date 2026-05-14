@@ -1,4 +1,4 @@
-from sqlalchemy import String, Boolean, ForeignKey, Enum as SAEnum
+from sqlalchemy import String, Integer, Boolean, ForeignKey, Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -19,6 +19,13 @@ class Camera(Base, UUIDMixin, TimestampMixin):
         default=CameraStatus.ACTIVE,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Frame dimensions (set from snapshot capture)
+    frame_width: Mapped[int] = mapped_column(Integer, nullable=True)
+    frame_height: Mapped[int] = mapped_column(Integer, nullable=True)
+
+    # Reference snapshot path (for polygon drawing in Central FE)
+    snapshot_path: Mapped[str] = mapped_column(String(500), nullable=True)
 
     device = relationship("Device", back_populates="cameras", lazy="selectin")
     slots = relationship("ParkingSlot", back_populates="camera", lazy="selectin")

@@ -120,6 +120,8 @@ async def get_canvas_data(
                 device_id=device.id,
                 position_label=cam.position_label,
                 status=cam.status,
+                frame_width=cam.frame_width,
+                frame_height=cam.frame_height,
                 slots=[
                     CanvasSlot(
                         id=s.id, label=s.label, state=s.state, polygon_coords=s.polygon_coords,

@@ -56,6 +56,8 @@ class CanvasCamera(BaseSchema):
     device_id: uuid.UUID
     position_label: str
     status: str
+    frame_width: Optional[int] = None
+    frame_height: Optional[int] = None
     slots: List[CanvasSlot]
 
 

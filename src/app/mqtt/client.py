@@ -145,7 +145,7 @@ def _handle_ack(device_id: str, payload: dict):
 
 
 def _handle_cmd_result(device_id: str, payload: dict):
-    """Handle command results (e.g., snapshot image) — save to disk."""
+    """Handle command results (e.g., snapshot image) — save to disk + update camera record."""
     import base64
     import os
 
@@ -161,11 +161,17 @@ def _handle_cmd_result(device_id: str, payload: dict):
         os.makedirs("data/snapshots", exist_ok=True)
         camera_label = payload.get("camera_label", "unknown")
         path = f"data/snapshots/{device_id}_{camera_label}.jpg"
+        width = payload.get("width")
+        height = payload.get("height")
 
         with open(path, "wb") as f:
             f.write(base64.b64decode(image_b64))
 
-        logger.info("Snapshot saved: %s (cmd=%s)", path, command_id)
+        # Update camera record with frame dimensions + snapshot path
+        from src.app.tasks.sync_camera import update_camera_snapshot
+        update_camera_snapshot.delay(device_id, camera_label, path, width, height)
+
+        logger.info("Snapshot saved: %s (%sx%s, cmd=%s)", path, width, height, command_id)
     else:
         logger.info("Command result from %s: action=%s", device_id, action)
 
