@@ -14,6 +14,12 @@ class DeviceStatus(str, enum.Enum):
     MAINTENANCE = "MAINTENANCE"
 
 
+class CameraType(str, enum.Enum):
+    CSI = "CSI"
+    RTSP = "RTSP"
+    USB = "USB"
+
+
 class CameraStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"
     INACTIVE = "INACTIVE"
@@ -30,10 +36,6 @@ class LocationType(str, enum.Enum):
 
 class UserRole(str, enum.Enum):
     SUPER_ADMIN = "SUPER_ADMIN"
-    REGIONAL_MANAGER = "REGIONAL_MANAGER"
-    LOCATION_MANAGER = "LOCATION_MANAGER"
-    OPERATOR = "OPERATOR"
-    TECHNICIAN = "TECHNICIAN"
 
 
 class ScopeType(str, enum.Enum):
@@ -59,6 +61,7 @@ class AlertStatus(str, enum.Enum):
 
 class AlertTriggerType(str, enum.Enum):
     DEVICE_OFFLINE = "DEVICE_OFFLINE"
+    DEVICE_ONLINE = "DEVICE_ONLINE"
     CAMERA_FAILURE = "CAMERA_FAILURE"
     HIGH_OCCUPANCY = "HIGH_OCCUPANCY"
     OBSTRUCTION_PATTERN = "OBSTRUCTION_PATTERN"
@@ -119,6 +122,9 @@ class MQTTTopics:
     CMD_CONFIG = "cmd/{device_id}/config"
     CMD_SHELL = "cmd/{device_id}/shell"
     CMD_SNAPSHOT = "cmd/{device_id}/snapshot"
+    CMD_CONFIG_CAMERA = "cmd/{device_id}/config/camera"
+    CMD_CONFIG_SLOTS = "cmd/{device_id}/config/slots"
+    CMD_CALIBRATE = "cmd/{device_id}/calibrate"
 
     # Config sync from devices
     SYNC_CAMERA = "parking/{device_id}/sync/camera"
@@ -137,29 +143,59 @@ class MQTTTopics:
 
 # Permissions
 class Permission:
+    # Devices — CRUD + special actions
     DEVICES_VIEW = "devices:view"
+    DEVICES_CREATE = "devices:create"
+    DEVICES_EDIT = "devices:edit"
+    DEVICES_DELETE = "devices:delete"
     DEVICES_RESTART = "devices:restart"
-    DEVICES_UPDATE = "devices:update"
+    DEVICES_UPDATE = "devices:update"       # Firmware/OTA push
     DEVICES_SHELL = "devices:shell"
 
+    # Locations (includes floors, zones) — CRUD
     LOCATIONS_VIEW = "locations:view"
-    LOCATIONS_MANAGE = "locations:manage"
+    LOCATIONS_CREATE = "locations:create"
+    LOCATIONS_EDIT = "locations:edit"
+    LOCATIONS_DELETE = "locations:delete"
 
+    # Parking Slots — CRUD
     SLOTS_VIEW = "slots:view"
+    SLOTS_CREATE = "slots:create"
+    SLOTS_EDIT = "slots:edit"
+    SLOTS_DELETE = "slots:delete"
 
+    # Users — CRUD
     USERS_VIEW = "users:view"
     USERS_CREATE = "users:create"
     USERS_EDIT = "users:edit"
     USERS_DELETE = "users:delete"
 
+    # Roles — CRUD
+    ROLES_VIEW = "roles:view"
+    ROLES_CREATE = "roles:create"
+    ROLES_EDIT = "roles:edit"
+    ROLES_DELETE = "roles:delete"
+
+    # Alerts — CRUD + special
     ALERTS_VIEW = "alerts:view"
+    ALERTS_CREATE = "alerts:create"
+    ALERTS_EDIT = "alerts:edit"
+    ALERTS_DELETE = "alerts:delete"
     ALERTS_ACKNOWLEDGE = "alerts:acknowledge"
     ALERTS_CONFIGURE = "alerts:configure"
 
+    # Reports — view + export
     REPORTS_VIEW = "reports:view"
     REPORTS_EXPORT = "reports:export"
 
+    # Notifications — CRUD
+    NOTIFICATIONS_VIEW = "notifications:view"
+    NOTIFICATIONS_CREATE = "notifications:create"
+    NOTIFICATIONS_EDIT = "notifications:edit"
+    NOTIFICATIONS_DELETE = "notifications:delete"
     NOTIFICATIONS_CONFIGURE = "notifications:configure"
 
+    # OTA — deploy + rollback
+    OTA_VIEW = "ota:view"
     OTA_DEPLOY = "ota:deploy"
     OTA_ROLLBACK = "ota:rollback"

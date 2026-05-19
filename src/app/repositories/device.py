@@ -22,18 +22,21 @@ class DeviceRepository(BaseRepository[Device]):
     async def get_by_location_id(self, location_id: uuid.UUID) -> List[Device]:
         result = await self.db.execute(
             select(Device).where(Device.location_id == location_id)
+            .order_by(Device.device_id)
         )
         return list(result.scalars().all())
 
     async def get_by_status(self, status: DeviceStatus) -> List[Device]:
         result = await self.db.execute(
             select(Device).where(Device.status == status)
+            .order_by(Device.device_id)
         )
         return list(result.scalars().all())
 
     async def get_by_location_ids(self, location_ids: List[uuid.UUID]) -> List[Device]:
         result = await self.db.execute(
             select(Device).where(Device.location_id.in_(location_ids))
+            .order_by(Device.device_id)
         )
         return list(result.scalars().all())
 
@@ -51,7 +54,7 @@ class DeviceRepository(BaseRepository[Device]):
             for key, value in filters.items():
                 if value is not None and hasattr(Device, key):
                     query = query.where(getattr(Device, key) == value)
-        query = query.offset(skip).limit(limit)
+        query = query.order_by(Device.device_id).offset(skip).limit(limit)
         result = await self.db.execute(query)
         return list(result.scalars().all())
 

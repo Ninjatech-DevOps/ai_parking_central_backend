@@ -34,11 +34,11 @@ class CameraService:
             raise NotFoundException(detail="Camera not found")
         return await self.camera_repo.update(camera_id, data)
 
-    async def delete(self, camera_id: uuid.UUID) -> bool:
+    async def delete(self, camera_id: uuid.UUID) -> Any:
         camera = await self.camera_repo.get_by_id(camera_id)
         if not camera:
             raise NotFoundException(detail="Camera not found")
-        return await self.camera_repo.delete(camera_id)
+        return await self.camera_repo.update(camera_id, {"is_active": False})
 
     async def apply_slot_config(self, camera_id: uuid.UUID, slots: List[Dict]) -> Any:
         """Client pushes slot positions for a camera."""

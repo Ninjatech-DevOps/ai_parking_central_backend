@@ -23,7 +23,7 @@ def get_taluka_service(db: AsyncSession = Depends(get_db)) -> TalukaService:
     "",
     response_model=TalukaResponse,
     status_code=201,
-    dependencies=[Depends(PermissionChecker(Permission.LOCATIONS_MANAGE))],
+    dependencies=[Depends(PermissionChecker(Permission.LOCATIONS_CREATE))],
 )
 async def create_taluka(
     body: TalukaCreate, service: TalukaService = Depends(get_taluka_service)
@@ -60,7 +60,7 @@ async def update_taluka(
     taluka_id: uuid.UUID,
     body: TalukaUpdate,
     service: TalukaService = Depends(get_taluka_service),
-    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_MANAGE)),
+    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_EDIT)),
 ):
     return await service.update(taluka_id, body.model_dump(exclude_unset=True))
 
@@ -69,7 +69,7 @@ async def update_taluka(
 async def delete_taluka(
     taluka_id: uuid.UUID,
     service: TalukaService = Depends(get_taluka_service),
-    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_MANAGE)),
+    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_DELETE)),
 ):
     await service.delete(taluka_id)
     return MessageResponse(message="Taluka deleted successfully")

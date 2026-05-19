@@ -15,5 +15,6 @@ class VillageRepository(BaseRepository[Village]):
     async def get_by_taluka_id(self, taluka_id: uuid.UUID) -> List[Village]:
         result = await self.db.execute(
             select(Village).where(Village.taluka_id == taluka_id)
+            .order_by(Village.name)
         )
         return list(result.scalars().all())

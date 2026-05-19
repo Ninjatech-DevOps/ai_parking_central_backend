@@ -18,6 +18,12 @@ class UserRoleRepository(BaseRepository[UserRole]):
         )
         return list(result.scalars().all())
 
+    async def get_by_role_id(self, role_id: uuid.UUID) -> List[UserRole]:
+        result = await self.db.execute(
+            select(UserRole).where(UserRole.role_id == role_id)
+        )
+        return list(result.scalars().all())
+
     async def delete_by_user_id(self, user_id: uuid.UUID) -> None:
         await self.db.execute(
             delete(UserRole).where(UserRole.user_id == user_id)

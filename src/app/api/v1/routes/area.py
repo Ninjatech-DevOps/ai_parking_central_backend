@@ -20,7 +20,7 @@ def get_area_service(db: AsyncSession = Depends(get_db)) -> AreaService:
 
 
 @router.post("", response_model=AreaResponse, status_code=201,
-    dependencies=[Depends(PermissionChecker(Permission.LOCATIONS_MANAGE))])
+    dependencies=[Depends(PermissionChecker(Permission.LOCATIONS_CREATE))])
 async def create_area(
     body: AreaCreate, service: AreaService = Depends(get_area_service)
 ):
@@ -61,7 +61,7 @@ async def update_area(
     area_id: uuid.UUID,
     body: AreaUpdate,
     service: AreaService = Depends(get_area_service),
-    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_MANAGE)),
+    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_EDIT)),
 ):
     return await service.update(area_id, body.model_dump(exclude_unset=True))
 
@@ -70,7 +70,7 @@ async def update_area(
 async def delete_area(
     area_id: uuid.UUID,
     service: AreaService = Depends(get_area_service),
-    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_MANAGE)),
+    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_DELETE)),
 ):
     await service.delete(area_id)
     return MessageResponse(message="Area deleted successfully")

@@ -17,6 +17,9 @@ CLAUDE.md
 .env.local
 .env.*.local
 
+# Firebase credentials
+firebase-adminsdk.json
+
 # Python
 __pycache__/
 *.py[cod]

@@ -7,11 +7,15 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 
 from src.celery_app import celery_app
-from src.app.core.constants import DeviceStatus, CameraStatus
+from src.app.core.constants import (
+    DeviceStatus, CameraStatus, AlertSeverity, AlertStatus, AlertTriggerType,
+)
 from src.app.db.session import get_celery_session_factory
 from src.app.models.device import Device
 from src.app.models.camera import Camera
 from src.app.models.device_telemetry import DeviceTelemetry
+from src.app.models.alert_rule import AlertRule
+from src.app.models.alert_event import AlertEvent
 
 logger = logging.getLogger("ai_parking.tasks.heartbeat")
 
@@ -19,8 +23,12 @@ logger = logging.getLogger("ai_parking.tasks.heartbeat")
 async def _process(device_id_str: str, data: dict):
     async with get_celery_session_factory()() as db:
         try:
+            # FOR UPDATE (no skip) — second concurrent heartbeat blocks until first commits
+            # This prevents duplicate "back online" alerts
             result = await db.execute(
-                select(Device).where(Device.device_id == device_id_str)
+                select(Device)
+                .where(Device.device_id == device_id_str)
+                .with_for_update()
             )
             device = result.scalars().first()
             if not device:
@@ -28,13 +36,19 @@ async def _process(device_id_str: str, data: dict):
                 return
 
             now = datetime.now(timezone.utc)
+            was_offline = device.status == DeviceStatus.OFFLINE
 
-            # Update device status and last_seen
+            # Update device status and last_seen FIRST — so blocked concurrent workers
+            # will see ONLINE when they acquire the lock
             await db.execute(
                 update(Device)
                 .where(Device.id == device.id)
                 .values(status=DeviceStatus.ONLINE, last_seen=now)
             )
+
+            # Device came back online — resolve offline alert + create online alert
+            if was_offline:
+                await _handle_device_back_online(db, device, now)
 
             # Store telemetry
             telemetry = DeviceTelemetry(
@@ -73,6 +87,54 @@ async def _process(device_id_str: str, data: dict):
             await db.rollback()
             logger.exception("Failed to process heartbeat for %s", device_id_str)
             raise
+
+
+async def _handle_device_back_online(db, device, now):
+    """Resolve active DEVICE_OFFLINE alerts and create a DEVICE_ONLINE alert."""
+    # Auto-resolve any active DEVICE_OFFLINE alerts for this device
+    result = await db.execute(
+        select(AlertEvent).where(
+            AlertEvent.device_id == device.id,
+            AlertEvent.status == AlertStatus.ACTIVE,
+        )
+    )
+    for alert in result.scalars().all():
+        await db.execute(
+            update(AlertEvent)
+            .where(AlertEvent.id == alert.id)
+            .values(status=AlertStatus.RESOLVED, resolved_at=now)
+        )
+
+    # Get DEVICE_ONLINE alert rule
+    result = await db.execute(
+        select(AlertRule).where(
+            AlertRule.trigger_type == AlertTriggerType.DEVICE_ONLINE,
+            AlertRule.is_active == True,
+        )
+    )
+    rule = result.scalars().first()
+    if not rule:
+        logger.warning("No DEVICE_ONLINE alert rule found. Skipping online alert.")
+        return
+
+    # Create "device back online" alert event
+    loc_name = device.location.name if device.location else "Unknown"
+    alert = AlertEvent(
+        alert_rule_id=rule.id,
+        device_id=device.id,
+        location_id=device.location_id,
+        severity=AlertSeverity.MEDIUM,
+        message=f"{device.device_id} at {loc_name} is back online and operational.",
+        status=AlertStatus.RESOLVED,
+    )
+    db.add(alert)
+    await db.flush()
+
+    # Dispatch notifications
+    from src.app.tasks.notifications import dispatch_alert_notifications
+    dispatch_alert_notifications.delay(str(alert.id), str(device.location_id))
+
+    logger.info("Device %s back online. Offline alerts resolved, online alert created.", device.device_id)
 
 
 @celery_app.task(name="tasks.process_heartbeat", bind=True, max_retries=3)

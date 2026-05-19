@@ -23,7 +23,7 @@ def get_zone_service(db: AsyncSession = Depends(get_db)) -> ZoneService:
     "",
     response_model=ZoneResponse,
     status_code=201,
-    dependencies=[Depends(PermissionChecker(Permission.LOCATIONS_MANAGE))],
+    dependencies=[Depends(PermissionChecker(Permission.LOCATIONS_CREATE))],
 )
 async def create_zone(
     body: ZoneCreate, service: ZoneService = Depends(get_zone_service)
@@ -60,7 +60,7 @@ async def update_zone(
     zone_id: uuid.UUID,
     body: ZoneUpdate,
     service: ZoneService = Depends(get_zone_service),
-    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_MANAGE)),
+    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_EDIT)),
 ):
     return await service.update(zone_id, body.model_dump(exclude_unset=True))
 
@@ -69,7 +69,7 @@ async def update_zone(
 async def delete_zone(
     zone_id: uuid.UUID,
     service: ZoneService = Depends(get_zone_service),
-    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_MANAGE)),
+    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_DELETE)),
 ):
     await service.delete(zone_id)
     return MessageResponse(message="Zone deleted successfully")

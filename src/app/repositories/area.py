@@ -15,5 +15,6 @@ class AreaRepository(BaseRepository[Area]):
     async def get_by_city_id(self, city_id: uuid.UUID) -> List[Area]:
         result = await self.db.execute(
             select(Area).where(Area.city_id == city_id)
+            .order_by(Area.name)
         )
         return list(result.scalars().all())

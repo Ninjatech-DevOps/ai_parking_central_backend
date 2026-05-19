@@ -23,7 +23,7 @@ def get_floor_service(db: AsyncSession = Depends(get_db)) -> FloorService:
     "",
     response_model=FloorResponse,
     status_code=201,
-    dependencies=[Depends(PermissionChecker(Permission.LOCATIONS_MANAGE))],
+    dependencies=[Depends(PermissionChecker(Permission.LOCATIONS_CREATE))],
 )
 async def create_floor(
     body: FloorCreate, service: FloorService = Depends(get_floor_service)
@@ -60,7 +60,7 @@ async def update_floor(
     floor_id: uuid.UUID,
     body: FloorUpdate,
     service: FloorService = Depends(get_floor_service),
-    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_MANAGE)),
+    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_EDIT)),
 ):
     return await service.update(floor_id, body.model_dump(exclude_unset=True))
 
@@ -69,7 +69,7 @@ async def update_floor(
 async def delete_floor(
     floor_id: uuid.UUID,
     service: FloorService = Depends(get_floor_service),
-    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_MANAGE)),
+    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_DELETE)),
 ):
     await service.delete(floor_id)
     return MessageResponse(message="Floor deleted successfully")

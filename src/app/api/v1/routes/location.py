@@ -29,7 +29,7 @@ def get_location_service(db: AsyncSession = Depends(get_db)) -> LocationService:
 
 
 @router.post("", response_model=LocationResponse, status_code=201,
-    dependencies=[Depends(PermissionChecker(Permission.LOCATIONS_MANAGE))])
+    dependencies=[Depends(PermissionChecker(Permission.LOCATIONS_CREATE))])
 async def create_location(
     body: LocationCreate, service: LocationService = Depends(get_location_service)
 ):
@@ -49,14 +49,14 @@ async def list_locations(
     db: AsyncSession = Depends(get_db),
 ):
     skip, limit = get_pagination_params(page, page_size)
-    filters = {}
+    filters = {"is_active": True}
     if area_id: filters["area_id"] = area_id
     if city_id: filters["city_id"] = city_id
     if taluka_id: filters["taluka_id"] = taluka_id
     if village_id: filters["village_id"] = village_id
     repo = LocationRepository(db)
-    items = await repo.get_scoped(location_ids, skip=skip, limit=limit, filters=filters or None)
-    total = await repo.count_scoped(location_ids, filters=filters or None)
+    items = await repo.get_scoped(location_ids, skip=skip, limit=limit, filters=filters)
+    total = await repo.count_scoped(location_ids, filters=filters)
     return build_paginated_response(items, total, page, limit)
 
 
@@ -65,7 +65,10 @@ async def get_location(
     location_id: uuid.UUID,
     service: LocationService = Depends(get_location_service),
     _: bool = Depends(PermissionChecker(Permission.LOCATIONS_VIEW)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
 ):
+    from src.app.api.deps import verify_location_in_scope
+    verify_location_in_scope(location_id, user_location_ids)
     return await service.get(location_id)
 
 
@@ -74,7 +77,7 @@ async def update_location(
     location_id: uuid.UUID,
     body: LocationUpdate,
     service: LocationService = Depends(get_location_service),
-    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_MANAGE)),
+    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_EDIT)),
 ):
     return await service.update(location_id, body.model_dump(exclude_unset=True))
 
@@ -83,7 +86,7 @@ async def update_location(
 async def delete_location(
     location_id: uuid.UUID,
     service: LocationService = Depends(get_location_service),
-    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_MANAGE)),
+    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_DELETE)),
 ):
     await service.delete(location_id)
     return MessageResponse(message="Location deleted successfully")
@@ -94,8 +97,11 @@ async def get_canvas_data(
     location_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(PermissionChecker(Permission.SLOTS_VIEW)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
 ):
     """Get all camera canvas data for a location — slot positions + states."""
+    from src.app.api.deps import verify_location_in_scope
+    verify_location_in_scope(location_id, user_location_ids)
     loc_repo = LocationRepository(db)
     location = await loc_repo.get_by_id(location_id)
     if not location:
@@ -114,7 +120,7 @@ async def get_canvas_data(
         for cam in cameras:
             if not cam.is_active:
                 continue
-            slots = await slot_repo.get_all(filters={"camera_id": cam.id})
+            slots = await slot_repo.get_by_camera_id(cam.id)
             cameras_data.append(CanvasCamera(
                 id=cam.id,
                 device_id=device.id,

@@ -69,6 +69,20 @@ async def get_user_location_ids(
     return await resolver.resolve_location_ids(current_user.id)
 
 
+def verify_location_in_scope(
+    location_id: uuid.UUID,
+    user_location_ids: Optional[Set[uuid.UUID]],
+) -> None:
+    """
+    Validate that a location_id is within the user's scope.
+    None = Super Admin (full access). Empty set = no access.
+    """
+    if user_location_ids is None:
+        return  # Super Admin
+    if location_id not in user_location_ids:
+        raise ForbiddenException(detail="Access denied — location outside your scope")
+
+
 class PermissionChecker:
     def __init__(self, required_permission: str):
         self.required_permission = required_permission

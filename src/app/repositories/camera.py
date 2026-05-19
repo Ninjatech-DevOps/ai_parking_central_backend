@@ -12,10 +12,12 @@ class CameraRepository(BaseRepository[Camera]):
     def __init__(self, db: AsyncSession):
         super().__init__(Camera, db)
 
-    async def get_by_device_id(self, device_id: uuid.UUID) -> List[Camera]:
-        result = await self.db.execute(
-            select(Camera).where(Camera.device_id == device_id)
-        )
+    async def get_by_device_id(self, device_id: uuid.UUID, active_only: bool = True) -> List[Camera]:
+        query = select(Camera).where(Camera.device_id == device_id)
+        if active_only:
+            query = query.where(Camera.is_active == True)
+        query = query.order_by(Camera.position_label)
+        result = await self.db.execute(query)
         return list(result.scalars().all())
 
     async def get_by_device_and_label(self, device_id: uuid.UUID, label: str):

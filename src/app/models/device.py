@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, ForeignKey, Enum as SAEnum
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -28,6 +28,7 @@ class Device(Base, UUIDMixin, TimestampMixin):
         nullable=False,
         default=DeviceStatus.OFFLINE,
     )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     ip_address: Mapped[str] = mapped_column(String(45), nullable=True)
     docker_image_version: Mapped[str] = mapped_column(String(50), nullable=True)
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)

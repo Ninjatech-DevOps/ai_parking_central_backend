@@ -67,4 +67,5 @@ class ParkingSlotService:
         slot = await self.slot_repo.get_by_id(slot_id)
         if not slot:
             raise NotFoundException(detail="Parking slot not found")
-        return await self.slot_repo.delete(slot_id)
+        await self.slot_repo.soft_delete(slot_id)
+        return True

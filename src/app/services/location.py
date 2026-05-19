@@ -55,8 +55,8 @@ class LocationService:
 
         return await self.location_repo.update(location_id, data)
 
-    async def delete(self, location_id: uuid.UUID) -> bool:
+    async def delete(self, location_id: uuid.UUID) -> Any:
         location = await self.location_repo.get_by_id(location_id)
         if not location:
             raise NotFoundException(detail="Location not found")
-        return await self.location_repo.delete(location_id)
+        return await self.location_repo.update(location_id, {"is_active": False})

@@ -41,20 +41,30 @@ class DeviceSyncService:
             return
 
         # Create or update
+        source = camera_data.get("source")
+        camera_type = camera_data.get("camera_type")
+
         camera = await self.camera_repo.get_by_device_and_label(device.id, label)
         if camera:
-            await self.camera_repo.update(camera.id, {
-                "status": CameraStatus.ACTIVE,
-                "is_active": True,
-            })
+            update_data = {"status": CameraStatus.ACTIVE, "is_active": True}
+            if source:
+                update_data["source"] = source
+            if camera_type:
+                update_data["camera_type"] = camera_type
+            await self.camera_repo.update(camera.id, update_data)
             logger.info("Camera '%s' updated on device %s", label, device_id_str)
         else:
-            await self.camera_repo.create({
+            create_data = {
                 "device_id": device.id,
                 "position_label": label,
                 "status": CameraStatus.ACTIVE,
                 "is_active": True,
-            })
+            }
+            if source:
+                create_data["source"] = source
+            if camera_type:
+                create_data["camera_type"] = camera_type
+            await self.camera_repo.create(create_data)
             logger.info("Camera '%s' created on device %s", label, device_id_str)
 
     async def sync_slots(
@@ -77,16 +87,28 @@ class DeviceSyncService:
             )
             return
 
-        # Upsert: sync all slots for this camera
+        # Sync slots: update existing, create new, delete removed
+        # Client sends the full list of slots for a camera — any slot NOT in the
+        # list that exists in central should be removed (client deleted it).
+        created = 0
+        updated = 0
+        deleted = 0
+
         incoming_labels = {s["label"] for s in slots_data}
 
+        # Soft-delete slots that exist in central but are no longer on the client
+        existing_slots = await self.slot_repo.get_by_camera_id(camera.id)
+        for slot in existing_slots:
+            if slot.label not in incoming_labels:
+                await self.slot_repo.soft_delete(slot.id)
+                deleted += 1
+
+        # Create or update incoming slots
         for slot_data in slots_data:
             label = slot_data["label"]
             existing = await self.slot_repo.get_by_camera_and_label(camera.id, label)
 
             update_data = {
-                "zone_id": device.zone_id,
-                "camera_id": camera.id,
                 "polygon_coords": slot_data.get("polygon_coords"),
                 "pos_x1": slot_data.get("pos_x1"),
                 "pos_y1": slot_data.get("pos_y1"),
@@ -96,24 +118,18 @@ class DeviceSyncService:
 
             if existing:
                 await self.slot_repo.update(existing.id, update_data)
-            else:
+                updated += 1
+            elif action == "create":
                 await self.slot_repo.create({
                     "label": label,
+                    "zone_id": device.zone_id,
+                    "camera_id": camera.id,
                     "state": SlotState.EMPTY,
                     **update_data,
                 })
-
-        # Remove slots that are no longer in the incoming list (for this camera)
-        existing_slots = await self.slot_repo.get_by_camera_id(camera.id)
-        for slot in existing_slots:
-            if slot.label not in incoming_labels:
-                # Delete related slot_events first (FK constraint)
-                await self.slot_repo.db.execute(
-                    sa_delete(SlotEvent).where(SlotEvent.parking_slot_id == slot.id)
-                )
-                await self.slot_repo.delete(slot.id)
+                created += 1
 
         logger.info(
-            "Synced %d slots for camera '%s' on device %s",
-            len(slots_data), camera_label, device_id_str,
+            "Synced slots for camera '%s' on device %s: %d created, %d updated, %d deleted",
+            camera_label, device_id_str, created, updated, deleted,
         )

@@ -23,7 +23,7 @@ def get_village_service(db: AsyncSession = Depends(get_db)) -> VillageService:
     "",
     response_model=VillageResponse,
     status_code=201,
-    dependencies=[Depends(PermissionChecker(Permission.LOCATIONS_MANAGE))],
+    dependencies=[Depends(PermissionChecker(Permission.LOCATIONS_CREATE))],
 )
 async def create_village(
     body: VillageCreate, service: VillageService = Depends(get_village_service)
@@ -60,7 +60,7 @@ async def update_village(
     village_id: uuid.UUID,
     body: VillageUpdate,
     service: VillageService = Depends(get_village_service),
-    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_MANAGE)),
+    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_EDIT)),
 ):
     return await service.update(village_id, body.model_dump(exclude_unset=True))
 
@@ -69,7 +69,7 @@ async def update_village(
 async def delete_village(
     village_id: uuid.UUID,
     service: VillageService = Depends(get_village_service),
-    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_MANAGE)),
+    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_DELETE)),
 ):
     await service.delete(village_id)
     return MessageResponse(message="Village deleted successfully")

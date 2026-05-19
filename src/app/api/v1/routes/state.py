@@ -23,7 +23,7 @@ def get_state_service(db: AsyncSession = Depends(get_db)) -> StateService:
     "",
     response_model=StateResponse,
     status_code=201,
-    dependencies=[Depends(PermissionChecker(Permission.LOCATIONS_MANAGE))],
+    dependencies=[Depends(PermissionChecker(Permission.LOCATIONS_CREATE))],
 )
 async def create_state(
     body: StateCreate, service: StateService = Depends(get_state_service)
@@ -58,7 +58,7 @@ async def update_state(
     state_id: uuid.UUID,
     body: StateUpdate,
     service: StateService = Depends(get_state_service),
-    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_MANAGE)),
+    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_EDIT)),
 ):
     return await service.update(state_id, body.model_dump(exclude_unset=True))
 
@@ -67,7 +67,7 @@ async def update_state(
 async def delete_state(
     state_id: uuid.UUID,
     service: StateService = Depends(get_state_service),
-    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_MANAGE)),
+    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_DELETE)),
 ):
     await service.delete(state_id)
     return MessageResponse(message="State deleted successfully")

@@ -1,10 +1,10 @@
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.app.api.deps import PermissionChecker, get_current_user
+from src.app.api.deps import PermissionChecker, get_current_user, get_user_location_ids, verify_location_in_scope
 from src.app.core.constants import CommandType, Permission
 from src.app.db.session import get_db
 from src.app.models.user import User
@@ -21,6 +21,17 @@ from src.app.utils.pagination import build_paginated_response, get_pagination_pa
 router = APIRouter(prefix="/device-commands", tags=["Device Commands"])
 
 
+async def _verify_device_scope(
+    device_uuid: uuid.UUID,
+    user_location_ids: Optional[Set[uuid.UUID]],
+    db: AsyncSession,
+) -> None:
+    """Resolve device → location_id, then check scope."""
+    device = await DeviceRepository(db).get_by_id(device_uuid)
+    if device:
+        verify_location_in_scope(device.location_id, user_location_ids)
+
+
 def get_command_service(db: AsyncSession = Depends(get_db)) -> DeviceCommandService:
     return DeviceCommandService(
         command_repo=DeviceCommandRepository(db),
@@ -33,8 +44,11 @@ async def send_command(
     body: DeviceCommandCreate,
     current_user: User = Depends(get_current_user),
     service: DeviceCommandService = Depends(get_command_service),
+    db: AsyncSession = Depends(get_db),
     _: bool = Depends(PermissionChecker(Permission.DEVICES_RESTART)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
 ):
+    await _verify_device_scope(body.device_id, user_location_ids, db)
     return await service.send_command(
         device_uuid=body.device_id,
         command_type=body.command_type,
@@ -52,8 +66,11 @@ async def restart_device(
     device_uuid: uuid.UUID,
     current_user: User = Depends(get_current_user),
     service: DeviceCommandService = Depends(get_command_service),
+    db: AsyncSession = Depends(get_db),
     _: bool = Depends(PermissionChecker(Permission.DEVICES_RESTART)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
 ):
+    await _verify_device_scope(device_uuid, user_location_ids, db)
     return await service.send_command(
         device_uuid=device_uuid,
         command_type=CommandType.RESTART,
@@ -72,8 +89,11 @@ async def update_device(
     image: str = Query(..., description="Docker image tag to deploy"),
     current_user: User = Depends(get_current_user),
     service: DeviceCommandService = Depends(get_command_service),
+    db: AsyncSession = Depends(get_db),
     _: bool = Depends(PermissionChecker(Permission.DEVICES_UPDATE)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
 ):
+    await _verify_device_scope(device_uuid, user_location_ids, db)
     return await service.send_command(
         device_uuid=device_uuid,
         command_type=CommandType.UPDATE,
@@ -91,14 +111,26 @@ async def request_snapshot(
     device_uuid: uuid.UUID,
     current_user: User = Depends(get_current_user),
     service: DeviceCommandService = Depends(get_command_service),
+    db: AsyncSession = Depends(get_db),
     _: bool = Depends(PermissionChecker(Permission.DEVICES_VIEW)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
 ):
+    await _verify_device_scope(device_uuid, user_location_ids, db)
     return await service.send_command(
         device_uuid=device_uuid,
         command_type=CommandType.SNAPSHOT,
         payload=None,
         sent_by=current_user.id,
     )
+
+
+@router.get("/status/{command_id}", response_model=DeviceCommandResponse)
+async def get_command_status(
+    command_id: uuid.UUID,
+    service: DeviceCommandService = Depends(get_command_service),
+    _: bool = Depends(PermissionChecker(Permission.DEVICES_VIEW)),
+):
+    return await service.get_command(command_id)
 
 
 @router.get(
@@ -109,8 +141,11 @@ async def get_device_command_history(
     device_uuid: uuid.UUID,
     limit: int = Query(20, ge=1, le=100),
     service: DeviceCommandService = Depends(get_command_service),
+    db: AsyncSession = Depends(get_db),
     _: bool = Depends(PermissionChecker(Permission.DEVICES_VIEW)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
 ):
+    await _verify_device_scope(device_uuid, user_location_ids, db)
     return await service.get_device_commands(device_uuid, limit=limit)
 
 

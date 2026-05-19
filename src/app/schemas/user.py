@@ -21,6 +21,26 @@ class UserUpdate(BaseSchema):
     phone: Optional[str] = None
     is_active: Optional[bool] = None
     fcm_tokens: Optional[List[str]] = None
+    # Allow updating roles and scopes on edit
+    role_ids: Optional[List[uuid.UUID]] = None
+    scopes: Optional[List["UserScopeAssign"]] = None
+
+
+# ─── Nested response schemas for roles & scopes ───
+
+class UserRoleInfo(BaseSchema):
+    """Role info embedded in user responses."""
+    id: uuid.UUID
+    name: str
+    description: Optional[str] = None
+
+
+class UserScopeInfo(BaseSchema):
+    """Scope assignment embedded in user responses."""
+    id: uuid.UUID
+    scope_type: ScopeType
+    scope_id: uuid.UUID
+    scope_name: Optional[str] = None  # Resolved display name (e.g. "Mumbai")
 
 
 class UserResponse(BaseResponse):
@@ -29,6 +49,19 @@ class UserResponse(BaseResponse):
     phone: Optional[str]
     is_active: bool
     fcm_tokens: Optional[List[str]]
+    roles: List[UserRoleInfo] = []
+    scopes: List[UserScopeInfo] = []
+
+
+class UserMeResponse(BaseResponse):
+    """Enriched response for GET /users/me — includes permissions list."""
+    email: str
+    name: str
+    phone: Optional[str]
+    is_active: bool
+    roles: List[UserRoleInfo] = []
+    permissions: List[str] = []  # ["devices:view", "users:create", ...]
+    scopes: List[UserScopeInfo] = []
 
 
 class UserScopeAssign(BaseSchema):

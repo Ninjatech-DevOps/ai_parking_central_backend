@@ -15,12 +15,14 @@ class LocationRepository(BaseRepository[Location]):
     async def get_by_area_id(self, area_id: uuid.UUID) -> List[Location]:
         result = await self.db.execute(
             select(Location).where(Location.area_id == area_id)
+            .order_by(Location.name)
         )
         return list(result.scalars().all())
 
     async def get_active(self) -> List[Location]:
         result = await self.db.execute(
             select(Location).where(Location.is_active == True)
+            .order_by(Location.name)
         )
         return list(result.scalars().all())
 
@@ -38,7 +40,7 @@ class LocationRepository(BaseRepository[Location]):
             for key, value in filters.items():
                 if value is not None and hasattr(Location, key):
                     query = query.where(getattr(Location, key) == value)
-        query = query.offset(skip).limit(limit)
+        query = query.order_by(Location.name).offset(skip).limit(limit)
         result = await self.db.execute(query)
         return list(result.scalars().all())
 

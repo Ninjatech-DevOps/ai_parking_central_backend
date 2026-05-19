@@ -23,7 +23,7 @@ def get_city_service(db: AsyncSession = Depends(get_db)) -> CityService:
     "",
     response_model=CityResponse,
     status_code=201,
-    dependencies=[Depends(PermissionChecker(Permission.LOCATIONS_MANAGE))],
+    dependencies=[Depends(PermissionChecker(Permission.LOCATIONS_CREATE))],
 )
 async def create_city(
     body: CityCreate, service: CityService = Depends(get_city_service)
@@ -60,7 +60,7 @@ async def update_city(
     city_id: uuid.UUID,
     body: CityUpdate,
     service: CityService = Depends(get_city_service),
-    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_MANAGE)),
+    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_EDIT)),
 ):
     return await service.update(city_id, body.model_dump(exclude_unset=True))
 
@@ -69,7 +69,7 @@ async def update_city(
 async def delete_city(
     city_id: uuid.UUID,
     service: CityService = Depends(get_city_service),
-    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_MANAGE)),
+    _: bool = Depends(PermissionChecker(Permission.LOCATIONS_DELETE)),
 ):
     await service.delete(city_id)
     return MessageResponse(message="City deleted successfully")

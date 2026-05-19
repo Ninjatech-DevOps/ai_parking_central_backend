@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer, Text, ForeignKey, Enum as SAEnum
+from sqlalchemy import String, Integer, Boolean, Text, ForeignKey, Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -21,6 +21,7 @@ class ParkingSlot(Base, UUIDMixin, TimestampMixin):
         nullable=False,
         default=SlotState.EMPTY,
     )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Polygon coordinates from client ROI (JSON: [[x1,y1],[x2,y2],[x3,y3],[x4,y4]])
     polygon_coords: Mapped[str] = mapped_column(Text, nullable=True)
     # Bounding box (auto-calculated from polygon for canvas)

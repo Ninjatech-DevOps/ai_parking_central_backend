@@ -37,14 +37,16 @@ def _init_firebase():
         return False
 
 
-def send_push(tokens: List[str], title: str, body: str, data: dict = None):
-    """Send push notification to FCM tokens (web browser or mobile)."""
+def send_push(tokens: List[str], title: str, body: str, data: dict = None) -> tuple[bool, List[str]]:
+    """Send push notification to FCM tokens.
+    Returns (success, stale_tokens) — stale_tokens should be removed from the user.
+    """
     if not tokens:
         logger.debug("No FCM tokens provided. Skipping push.")
-        return False
+        return False, []
 
     if not _init_firebase():
-        return False
+        return False, []
 
     try:
         from firebase_admin import messaging
@@ -71,16 +73,21 @@ def send_push(tokens: List[str], title: str, body: str, data: dict = None):
             response.failure_count,
         )
 
+        stale_tokens = []
         for i, send_response in enumerate(response.responses):
             if not send_response.success:
+                error_str = str(send_response.exception)
                 logger.warning(
                     "FCM token failed: %s — %s",
-                    tokens[i][:20],
-                    send_response.exception,
+                    tokens[i][:30],
+                    error_str,
                 )
+                # Collect stale/invalid tokens for cleanup
+                if "NotRegistered" in error_str or "InvalidArgument" in error_str:
+                    stale_tokens.append(tokens[i])
 
-        return response.success_count > 0
+        return response.success_count > 0, stale_tokens
 
     except Exception:
         logger.exception("Failed to send FCM push")
-        return False
+        return False, []

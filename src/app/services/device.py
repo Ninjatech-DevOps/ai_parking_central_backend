@@ -64,8 +64,8 @@ class DeviceService:
             raise NotFoundException(detail="Device not found")
         return await self.device_repo.update(device.id, {"status": status})
 
-    async def delete(self, id: uuid.UUID) -> bool:
+    async def delete(self, id: uuid.UUID):
         device = await self.device_repo.get_by_id(id)
         if not device:
             raise NotFoundException(detail="Device not found")
-        return await self.device_repo.delete(id)
+        return await self.device_repo.update(id, {"is_active": False})

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import String, Text, DateTime, ForeignKey, Enum as SAEnum, func
+from sqlalchemy import String, Text, Boolean, DateTime, ForeignKey, Enum as SAEnum, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -28,6 +28,8 @@ class NotificationLog(Base, UUIDMixin):
         nullable=False,
     )
     error: Mapped[str] = mapped_column(Text, nullable=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User", lazy="selectin")
     alert_event = relationship("AlertEvent", lazy="selectin")

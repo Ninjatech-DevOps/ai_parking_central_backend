@@ -26,59 +26,53 @@ from src.app.models.user_role import UserRole
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("seed")
 
-# All permissions in the system
+# All permissions in the system — standard CRUD + special actions per resource
 ALL_PERMISSIONS = [
     ("devices", "view"),
+    ("devices", "create"),
+    ("devices", "edit"),
+    ("devices", "delete"),
     ("devices", "restart"),
-    ("devices", "update"),
+    ("devices", "update"),       # Firmware/OTA push
     ("devices", "shell"),
     ("locations", "view"),
-    ("locations", "manage"),
+    ("locations", "create"),
+    ("locations", "edit"),
+    ("locations", "delete"),
     ("slots", "view"),
+    ("slots", "create"),
+    ("slots", "edit"),
+    ("slots", "delete"),
     ("users", "view"),
     ("users", "create"),
     ("users", "edit"),
     ("users", "delete"),
+    ("roles", "view"),
+    ("roles", "create"),
+    ("roles", "edit"),
+    ("roles", "delete"),
     ("alerts", "view"),
+    ("alerts", "create"),
+    ("alerts", "edit"),
+    ("alerts", "delete"),
     ("alerts", "acknowledge"),
     ("alerts", "configure"),
     ("reports", "view"),
     ("reports", "export"),
+    ("notifications", "view"),
+    ("notifications", "create"),
+    ("notifications", "edit"),
+    ("notifications", "delete"),
     ("notifications", "configure"),
+    ("ota", "view"),
     ("ota", "deploy"),
     ("ota", "rollback"),
 ]
 
-# Role -> list of permission keys
+# Only SUPER_ADMIN is seeded as a system role.
+# All other roles are created dynamically via the Roles page.
 ROLE_PERMISSIONS = {
     UserRoleEnum.SUPER_ADMIN: [f"{r}:{a}" for r, a in ALL_PERMISSIONS],  # all
-    UserRoleEnum.REGIONAL_MANAGER: [
-        "devices:view", "devices:restart",
-        "locations:view", "locations:manage",
-        "slots:view",
-        "users:view",
-        "alerts:view", "alerts:acknowledge", "alerts:configure",
-        "reports:view", "reports:export",
-        "notifications:configure",
-        "ota:deploy",
-    ],
-    UserRoleEnum.LOCATION_MANAGER: [
-        "devices:view", "devices:restart",
-        "locations:view",
-        "slots:view",
-        "alerts:view", "alerts:acknowledge",
-        "reports:view",
-    ],
-    UserRoleEnum.OPERATOR: [
-        "devices:view",
-        "locations:view",
-        "slots:view",
-        "alerts:view", "alerts:acknowledge",
-    ],
-    UserRoleEnum.TECHNICIAN: [
-        "devices:view", "devices:restart", "devices:update",
-        "alerts:view",
-    ],
 }
 
 # Default Super Admin credentials (from env or fallback)
@@ -113,7 +107,12 @@ async def seed_permissions(db: AsyncSession) -> dict:
 
 
 async def seed_roles(db: AsyncSession, perm_map: dict) -> dict:
-    """Create all roles with their permissions. Returns {name: id} map."""
+    """
+    Create or update system roles with their permissions.
+    - New roles are created.
+    - Existing system roles get their permissions synced (missing ones added).
+    Returns {name: id} map.
+    """
     role_map = {}
 
     for role_enum, perm_keys in ROLE_PERMISSIONS.items():
@@ -132,18 +131,24 @@ async def seed_roles(db: AsyncSession, perm_map: dict) -> dict:
             await db.flush()
             logger.info("Created role: %s", role_enum.value)
 
-            # Assign permissions to role
-            for perm_key in perm_keys:
-                if perm_key in perm_map:
-                    rp = RolePermission(
-                        role_id=role.id, permission_id=perm_map[perm_key]
-                    )
-                    db.add(rp)
-
-            await db.flush()
-            logger.info(
-                "Assigned %d permissions to role %s", len(perm_keys), role_enum.value
+        # Sync permissions — get existing, add any missing
+        result = await db.execute(
+            select(RolePermission.permission_id).where(
+                RolePermission.role_id == role.id
             )
+        )
+        existing_perm_ids = {row[0] for row in result.all()}
+
+        added = 0
+        for perm_key in perm_keys:
+            perm_id = perm_map.get(perm_key)
+            if perm_id and perm_id not in existing_perm_ids:
+                db.add(RolePermission(role_id=role.id, permission_id=perm_id))
+                added += 1
+
+        if added:
+            await db.flush()
+            logger.info("Added %d new permissions to %s", added, role_enum.value)
 
         role_map[role_enum.value] = role.id
 

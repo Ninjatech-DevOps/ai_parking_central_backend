@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.models.slot_event import SlotEvent
@@ -32,3 +32,10 @@ class SlotEventRepository(BaseRepository[SlotEvent]):
             query = query.where(SlotEvent.recorded_at <= end_time)
         result = await self.db.execute(query)
         return list(result.scalars().all())
+
+    async def delete_by_slot_id(self, parking_slot_id: uuid.UUID) -> int:
+        result = await self.db.execute(
+            delete(SlotEvent).where(SlotEvent.parking_slot_id == parking_slot_id)
+        )
+        await self.db.flush()
+        return result.rowcount

@@ -31,6 +31,8 @@ class BaseRepository(Generic[ModelType]):
             for key, value in filters.items():
                 if value is not None and hasattr(self.model, key):
                     query = query.where(getattr(self.model, key) == value)
+        if hasattr(self.model, "created_at"):
+            query = query.order_by(self.model.created_at)
         query = query.offset(skip).limit(limit)
         result = await self.db.execute(query)
         return list(result.scalars().all())

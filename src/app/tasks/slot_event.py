@@ -46,8 +46,11 @@ async def _process(device_id_str: str, camera_id: Optional[str], changes: list):
 
                 new_state = SlotState(new_state_str)
 
-                # Find slot by label within device's zone
-                query = select(ParkingSlot).where(ParkingSlot.label == slot_label)
+                # Find active slot by label within device's zone
+                query = select(ParkingSlot).where(
+                    ParkingSlot.label == slot_label,
+                    ParkingSlot.is_active == True,
+                )
                 if device.zone_id:
                     query = query.where(ParkingSlot.zone_id == device.zone_id)
                 result = await db.execute(query)

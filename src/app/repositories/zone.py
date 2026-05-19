@@ -15,5 +15,6 @@ class ZoneRepository(BaseRepository[Zone]):
     async def get_by_floor_id(self, floor_id: uuid.UUID) -> List[Zone]:
         result = await self.db.execute(
             select(Zone).where(Zone.floor_id == floor_id)
+            .order_by(Zone.name)
         )
         return list(result.scalars().all())

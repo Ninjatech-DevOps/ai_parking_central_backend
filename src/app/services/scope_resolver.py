@@ -78,18 +78,17 @@ class ScopeResolver:
             return {row[0] for row in result.all()}
 
         elif scope_type == ScopeType.CITY:
+            # Use denormalized city_id on Location (not Area join — area_id can be NULL)
             result = await self.db.execute(
-                select(Location.id)
-                .join(Area, Area.id == Location.area_id)
-                .where(Area.city_id == scope_id)
+                select(Location.id).where(Location.city_id == scope_id)
             )
             return {row[0] for row in result.all()}
 
         elif scope_type == ScopeType.STATE:
+            # Use denormalized city_id on Location → City.state_id
             result = await self.db.execute(
                 select(Location.id)
-                .join(Area, Area.id == Location.area_id)
-                .join(City, City.id == Area.city_id)
+                .join(City, City.id == Location.city_id)
                 .where(City.state_id == scope_id)
             )
             return {row[0] for row in result.all()}

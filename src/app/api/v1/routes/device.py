@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.app.api.deps import PermissionChecker, get_user_location_ids
+from src.app.api.deps import PermissionChecker, get_user_location_ids, verify_location_in_scope
 from src.app.core.constants import DeviceStatus, Permission
 from src.app.db.session import get_db
 from src.app.repositories.device import DeviceRepository
@@ -27,7 +27,7 @@ def get_device_service(db: AsyncSession = Depends(get_db)) -> DeviceService:
 
 
 @router.post("", response_model=DeviceResponse, status_code=201,
-    dependencies=[Depends(PermissionChecker(Permission.DEVICES_VIEW))])
+    dependencies=[Depends(PermissionChecker(Permission.DEVICES_CREATE))])
 async def create_device(
     body: DeviceCreate, service: DeviceService = Depends(get_device_service)
 ):
@@ -39,6 +39,7 @@ async def list_devices(
     page: int = Query(1, ge=1),
     page_size: int = Query(None),
     location_id: uuid.UUID = Query(None),
+    area_id: uuid.UUID = Query(None),
     city_id: uuid.UUID = Query(None),
     status: DeviceStatus = Query(None),
     _: bool = Depends(PermissionChecker(Permission.DEVICES_VIEW)),
@@ -46,13 +47,28 @@ async def list_devices(
     db: AsyncSession = Depends(get_db),
 ):
     skip, limit = get_pagination_params(page, page_size)
-    filters = {}
+    filters = {"is_active": True}
     if location_id: filters["location_id"] = location_id
     if city_id: filters["city_id"] = city_id
     if status: filters["status"] = status
+
+    # area_id: narrow scope to locations in this area
+    scoped_ids = user_location_ids
+    if area_id:
+        from sqlalchemy import select as sa_select
+        from src.app.models.location import Location
+        result = await db.execute(
+            sa_select(Location.id).where(Location.area_id == area_id)
+        )
+        area_loc_ids = {row[0] for row in result.all()}
+        if scoped_ids is not None:
+            scoped_ids = scoped_ids & area_loc_ids
+        else:
+            scoped_ids = area_loc_ids
+
     repo = DeviceRepository(db)
-    items = await repo.get_scoped(user_location_ids, skip=skip, limit=limit, filters=filters or None)
-    total = await repo.count_scoped(user_location_ids, filters=filters or None)
+    items = await repo.get_scoped(scoped_ids, skip=skip, limit=limit, filters=filters)
+    total = await repo.count_scoped(scoped_ids, filters=filters)
     return build_paginated_response(items, total, page, limit)
 
 
@@ -61,8 +77,11 @@ async def get_device(
     device_uuid: uuid.UUID,
     service: DeviceService = Depends(get_device_service),
     _: bool = Depends(PermissionChecker(Permission.DEVICES_VIEW)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
 ):
-    return await service.get(device_uuid)
+    device = await service.get(device_uuid)
+    verify_location_in_scope(device.location_id, user_location_ids)
+    return device
 
 
 @router.patch("/{device_uuid}", response_model=DeviceResponse)
@@ -70,8 +89,11 @@ async def update_device(
     device_uuid: uuid.UUID,
     body: DeviceUpdate,
     service: DeviceService = Depends(get_device_service),
-    _: bool = Depends(PermissionChecker(Permission.DEVICES_UPDATE)),
+    _: bool = Depends(PermissionChecker(Permission.DEVICES_EDIT)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
 ):
+    device = await service.get(device_uuid)
+    verify_location_in_scope(device.location_id, user_location_ids)
     return await service.update(device_uuid, body.model_dump(exclude_unset=True))
 
 
@@ -79,8 +101,11 @@ async def update_device(
 async def delete_device(
     device_uuid: uuid.UUID,
     service: DeviceService = Depends(get_device_service),
-    _: bool = Depends(PermissionChecker(Permission.DEVICES_UPDATE)),
+    _: bool = Depends(PermissionChecker(Permission.DEVICES_DELETE)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
 ):
+    device = await service.get(device_uuid)
+    verify_location_in_scope(device.location_id, user_location_ids)
     await service.delete(device_uuid)
     return MessageResponse(message="Device deleted successfully")
 
@@ -91,9 +116,11 @@ async def get_device_snapshot(
     camera_label: str = Query(None),
     service: DeviceService = Depends(get_device_service),
     _: bool = Depends(PermissionChecker(Permission.DEVICES_VIEW)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
 ):
     """Get the latest snapshot for a device (captured via snapshot command)."""
     device = await service.get(device_uuid)
+    verify_location_in_scope(device.location_id, user_location_ids)
 
     # Find matching snapshot file
     snapshot_dir = "data/snapshots"
@@ -112,4 +139,11 @@ async def get_device_snapshot(
         from src.app.exceptions.base import NotFoundException
         raise NotFoundException(detail="No snapshot available. Send a snapshot command first.")
 
-    return FileResponse(path, media_type="image/jpeg")
+    from fastapi.responses import Response
+    with open(path, "rb") as f:
+        data = f.read()
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )

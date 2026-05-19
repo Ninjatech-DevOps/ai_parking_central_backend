@@ -15,8 +15,10 @@ from src.app.api.v1.routes import (
     device_command,
     camera,
     parking_slot,
+    slot_event,
     alert_event,
     notification_preference,
+    notification,
     role,
     report,
 )
@@ -37,7 +39,9 @@ api_v1_router.include_router(device.router)
 api_v1_router.include_router(device_command.router)
 api_v1_router.include_router(camera.router)
 api_v1_router.include_router(parking_slot.router)
+api_v1_router.include_router(slot_event.router)
 api_v1_router.include_router(alert_event.router)
 api_v1_router.include_router(notification_preference.router)
+api_v1_router.include_router(notification.router)
 api_v1_router.include_router(role.router)
 api_v1_router.include_router(report.router)

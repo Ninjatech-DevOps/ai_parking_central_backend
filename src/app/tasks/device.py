@@ -69,14 +69,16 @@ async def _check_heartbeats():
 
                 # Create alert event
                 if rule:
+                    loc_name = device.location.name if device.location else "Unknown"
                     alert = AlertEvent(
                         alert_rule_id=rule.id,
                         device_id=device.id,
                         location_id=device.location_id,
                         severity=AlertSeverity.CRITICAL,
-                        message=f"Device {device.device_id} has not sent heartbeat for "
-                                f"{settings.DEVICE_OFFLINE_THRESHOLD_SECONDS}s. "
-                                f"Last seen: {device.last_seen}",
+                        message=(
+                            f"{device.device_id} at {loc_name} is offline and not responding. "
+                            f"Immediate attention required."
+                        ),
                         status=AlertStatus.ACTIVE,
                     )
                     db.add(alert)
