@@ -60,3 +60,5 @@ alembic/versions/__pycache__/
 # mypy / ruff
 .mypy_cache/
 .ruff_cache/
+
+graphify-out/

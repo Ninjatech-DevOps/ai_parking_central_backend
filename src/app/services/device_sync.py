@@ -87,21 +87,23 @@ class DeviceSyncService:
             )
             return
 
-        # Sync slots: update existing, create new, delete removed
-        # Client sends the full list of slots for a camera — any slot NOT in the
-        # list that exists in central should be removed (client deleted it).
+        # Sync slots: update existing, create new.
+        # Only remove slots NOT in the incoming list when action="create" (explicit
+        # client-side CRUD). For "upsert" (periodic sync), never delete — central
+        # may have slots the client doesn't know about yet.
         created = 0
         updated = 0
         deleted = 0
 
         incoming_labels = {s["label"] for s in slots_data}
 
-        # Soft-delete slots that exist in central but are no longer on the client
-        existing_slots = await self.slot_repo.get_by_camera_id(camera.id)
-        for slot in existing_slots:
-            if slot.label not in incoming_labels:
-                await self.slot_repo.soft_delete(slot.id)
-                deleted += 1
+        if action in ("create", "full_sync"):
+            # Explicit CRUD from client — safe to reconcile deletions
+            existing_slots = await self.slot_repo.get_by_camera_id(camera.id)
+            for slot in existing_slots:
+                if slot.label not in incoming_labels:
+                    await self.slot_repo.soft_delete(slot.id)
+                    deleted += 1
 
         # Create or update incoming slots
         for slot_data in slots_data:

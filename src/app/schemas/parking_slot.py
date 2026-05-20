@@ -11,6 +11,10 @@ class ParkingSlotCreate(BaseSchema):
     camera_id: Optional[uuid.UUID] = None
     state: SlotState = SlotState.EMPTY
     polygon_coords: Optional[str] = None
+    pos_x1: Optional[int] = None
+    pos_y1: Optional[int] = None
+    pos_x2: Optional[int] = None
+    pos_y2: Optional[int] = None
 
 
 class ParkingSlotUpdate(BaseSchema):

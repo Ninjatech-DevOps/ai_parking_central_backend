@@ -58,10 +58,16 @@ def send_push(tokens: List[str], title: str, body: str, data: dict = None) -> tu
                 body=body,
             ),
             data={k: str(v) for k, v in (data or {}).items()},
-            webpush=messaging.WebpushConfig(
-                notification=messaging.WebpushNotification(
-                    icon="/favicon.ico",
-                    badge="/favicon.ico",
+            android=messaging.AndroidConfig(
+                priority="high",
+                notification=messaging.AndroidNotification(
+                    channel_id="alerts",
+                    sound="default",
+                ),
+            ),
+            apns=messaging.APNSConfig(
+                payload=messaging.APNSPayload(
+                    aps=messaging.Aps(sound="default"),
                 ),
             ),
         )
