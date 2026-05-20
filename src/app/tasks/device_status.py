@@ -51,16 +51,24 @@ async def _process(device_id_str: str, status: str):
                 )
             )
 
+            # Collect notification to dispatch AFTER commit
+            pending_notification = None
+
             # Device went OFFLINE (LWT message) — create alert + notify
             if new_status == DeviceStatus.OFFLINE and previous_status != DeviceStatus.OFFLINE:
-                await _handle_device_went_offline(db, device, now)
+                pending_notification = await _handle_device_went_offline(db, device, now)
 
             # Device came back online via explicit status message
             if new_status == DeviceStatus.ONLINE and previous_status == DeviceStatus.OFFLINE:
-                await _handle_device_back_online(db, device, now)
+                pending_notification = await _handle_device_back_online(db, device, now)
 
             await db.commit()
             logger.info("Device %s → %s", device_id_str, new_status.value)
+
+            # Dispatch notifications AFTER commit so alert row is visible to notification worker
+            if pending_notification:
+                from src.app.tasks.notifications import dispatch_alert_notifications
+                dispatch_alert_notifications.delay(*pending_notification)
 
         except Exception:
             await db.rollback()
@@ -69,7 +77,7 @@ async def _process(device_id_str: str, status: str):
 
 
 async def _handle_device_went_offline(db, device, now):
-    """Create DEVICE_OFFLINE alert and dispatch notifications."""
+    """Create DEVICE_OFFLINE alert. Returns (alert_id, location_id) for post-commit dispatch, or None."""
     # Check if there's already an active offline alert for this device
     result = await db.execute(
         select(AlertEvent).where(
@@ -78,7 +86,7 @@ async def _handle_device_went_offline(db, device, now):
         )
     )
     if result.scalars().first():
-        return  # Already has an active alert
+        return None  # Already has an active alert
 
     # Get DEVICE_OFFLINE alert rule
     result = await db.execute(
@@ -90,7 +98,7 @@ async def _handle_device_went_offline(db, device, now):
     rule = result.scalars().first()
     if not rule:
         logger.warning("No DEVICE_OFFLINE alert rule found.")
-        return
+        return None
 
     loc_name = device.location.name if device.location else "Unknown"
     alert = AlertEvent(
@@ -107,13 +115,14 @@ async def _handle_device_went_offline(db, device, now):
     db.add(alert)
     await db.flush()
 
-    from src.app.tasks.notifications import dispatch_alert_notifications
-    dispatch_alert_notifications.delay(str(alert.id), str(device.location_id))
     logger.warning("Device %s went OFFLINE. Alert created.", device.device_id)
+    return str(alert.id), str(device.location_id)
 
 
 async def _handle_device_back_online(db, device, now):
-    """Resolve active DEVICE_OFFLINE alerts and create a DEVICE_ONLINE alert."""
+    """Resolve active DEVICE_OFFLINE alerts and create a DEVICE_ONLINE alert.
+    Returns (alert_id, location_id) for post-commit dispatch, or None.
+    """
     # Auto-resolve any active alerts for this device
     result = await db.execute(
         select(AlertEvent).where(
@@ -137,7 +146,7 @@ async def _handle_device_back_online(db, device, now):
     )
     rule = result.scalars().first()
     if not rule:
-        return
+        return None
 
     loc_name = device.location.name if device.location else "Unknown"
     alert = AlertEvent(
@@ -151,8 +160,7 @@ async def _handle_device_back_online(db, device, now):
     db.add(alert)
     await db.flush()
 
-    from src.app.tasks.notifications import dispatch_alert_notifications
-    dispatch_alert_notifications.delay(str(alert.id), str(device.location_id))
+    return str(alert.id), str(device.location_id)
 
 
 @celery_app.task(name="tasks.process_device_status", bind=True, max_retries=3)

@@ -47,8 +47,9 @@ async def _process(device_id_str: str, data: dict):
             )
 
             # Device came back online — resolve offline alert + create online alert
+            pending_notification = None
             if was_offline:
-                await _handle_device_back_online(db, device, now)
+                pending_notification = await _handle_device_back_online(db, device, now)
 
             # Store telemetry
             telemetry = DeviceTelemetry(
@@ -83,6 +84,11 @@ async def _process(device_id_str: str, data: dict):
             await db.commit()
             logger.debug("Heartbeat processed for %s", device_id_str)
 
+            # Dispatch notifications AFTER commit so alert row is visible to notification worker
+            if pending_notification:
+                from src.app.tasks.notifications import dispatch_alert_notifications
+                dispatch_alert_notifications.delay(*pending_notification)
+
         except Exception:
             await db.rollback()
             logger.exception("Failed to process heartbeat for %s", device_id_str)
@@ -90,7 +96,9 @@ async def _process(device_id_str: str, data: dict):
 
 
 async def _handle_device_back_online(db, device, now):
-    """Resolve active DEVICE_OFFLINE alerts and create a DEVICE_ONLINE alert."""
+    """Resolve active DEVICE_OFFLINE alerts and create a DEVICE_ONLINE alert.
+    Returns (alert_id, location_id) tuple for post-commit notification dispatch, or None.
+    """
     # Auto-resolve any active DEVICE_OFFLINE alerts for this device
     result = await db.execute(
         select(AlertEvent).where(
@@ -115,7 +123,7 @@ async def _handle_device_back_online(db, device, now):
     rule = result.scalars().first()
     if not rule:
         logger.warning("No DEVICE_ONLINE alert rule found. Skipping online alert.")
-        return
+        return None
 
     # Create "device back online" alert event
     loc_name = device.location.name if device.location else "Unknown"
@@ -130,11 +138,8 @@ async def _handle_device_back_online(db, device, now):
     db.add(alert)
     await db.flush()
 
-    # Dispatch notifications
-    from src.app.tasks.notifications import dispatch_alert_notifications
-    dispatch_alert_notifications.delay(str(alert.id), str(device.location_id))
-
     logger.info("Device %s back online. Offline alerts resolved, online alert created.", device.device_id)
+    return str(alert.id), str(device.location_id)
 
 
 @celery_app.task(name="tasks.process_heartbeat", bind=True, max_retries=3)

@@ -48,13 +48,21 @@ async def _check_heartbeats():
             )
             rule = result.scalars().first()
 
+            pending_notifications = []
+
             for device in stale_devices:
-                # Mark device as OFFLINE
-                await db.execute(
+                # Mark device as OFFLINE — only if still stale (a heartbeat may have arrived)
+                res = await db.execute(
                     update(Device)
-                    .where(Device.id == device.id)
+                    .where(
+                        Device.id == device.id,
+                        Device.status == DeviceStatus.ONLINE,
+                        Device.last_seen < threshold,
+                    )
                     .values(status=DeviceStatus.OFFLINE)
                 )
+                if res.rowcount == 0:
+                    continue  # Device was updated by a heartbeat since our SELECT
 
                 # Check if there's already an active alert for this device
                 result = await db.execute(
@@ -82,23 +90,27 @@ async def _check_heartbeats():
                         status=AlertStatus.ACTIVE,
                     )
                     db.add(alert)
+                    await db.flush()
+
+                    pending_notifications.append(
+                        (str(alert.id), str(device.location_id))
+                    )
 
                     logger.warning(
                         "Device %s marked OFFLINE. Alert created.", device.device_id
                     )
 
-                    # Dispatch notification task
-                    from src.app.tasks.notifications import dispatch_alert_notifications
-                    await db.flush()
-                    dispatch_alert_notifications.delay(
-                        str(alert.id), str(device.location_id)
-                    )
-
             await db.commit()
             logger.info(
-                "Heartbeat check complete. %d device(s) marked offline.",
+                "Heartbeat check complete. %d device(s) checked.",
                 len(stale_devices),
             )
+
+            # Dispatch notifications AFTER commit so alert rows are visible to notification worker
+            if pending_notifications:
+                from src.app.tasks.notifications import dispatch_alert_notifications
+                for alert_id, location_id in pending_notifications:
+                    dispatch_alert_notifications.delay(alert_id, location_id)
 
         except Exception:
             await db.rollback()
