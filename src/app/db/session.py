@@ -30,18 +30,25 @@ async def get_db() -> AsyncSession:
             await session.close()
 
 
+_celery_engine = None
+_celery_session_factory = None
+
+
 def get_celery_session_factory() -> async_sessionmaker:
-    """Create a fresh engine + session factory for Celery tasks.
-    Each asyncio.run() in Celery needs its own engine to avoid event loop conflicts."""
-    celery_engine = create_async_engine(
-        settings.database_url,
-        echo=settings.DB_ECHO,
-        pool_size=5,
-        max_overflow=5,
-        pool_pre_ping=True,
-    )
-    return async_sessionmaker(
-        celery_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
+    """Return a cached engine + session factory for Celery tasks.
+    One engine per worker process — avoids connection pool exhaustion."""
+    global _celery_engine, _celery_session_factory
+    if _celery_session_factory is None:
+        _celery_engine = create_async_engine(
+            settings.database_url,
+            echo=settings.DB_ECHO,
+            pool_size=5,
+            max_overflow=5,
+            pool_pre_ping=True,
+        )
+        _celery_session_factory = async_sessionmaker(
+            _celery_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+    return _celery_session_factory

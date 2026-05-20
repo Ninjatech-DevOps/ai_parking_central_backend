@@ -41,6 +41,10 @@ def on_connect(client, userdata, flags, reason_code, properties):
         logger.error("MQTT connect failed: %s", reason_code)
 
 
+def on_disconnect(client, userdata, flags, reason_code, properties):
+    logger.warning("MQTT disconnected: reason_code=%s (0=clean, 142=session_takeover)", reason_code)
+
+
 _TOPIC_HANDLERS = {
     "slots": "_handle_slot_snapshot",
     "events": "_handle_slot_events",
@@ -122,7 +126,14 @@ def _handle_heartbeat(device_id: str, payload: dict):
 
 def _handle_device_status(device_id: str, payload: dict):
     """Dispatch device online/offline status to Celery worker."""
+    import time
     from src.app.tasks.device_status import process_device_status
+
+    # Skip stale retained messages (older than offline threshold)
+    ts = payload.get("timestamp")
+    if ts and (time.time() - float(ts)) > settings.DEVICE_OFFLINE_THRESHOLD_SECONDS:
+        logger.debug("Skipping stale retained status from %s (age=%.0fs)", device_id, time.time() - float(ts))
+        return
 
     status = payload.get("status", "unknown")
     process_device_status.delay(device_id, status)
@@ -200,13 +211,17 @@ def _handle_sync_slots(device_id: str, payload: dict):
 def get_mqtt_client() -> mqtt.Client:
     global _mqtt_client
     if _mqtt_client is None:
+        import uuid
+        unique_id = f"{settings.MQTT_CLIENT_ID}-{uuid.uuid4().hex[:8]}"
         _mqtt_client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
-            client_id=settings.MQTT_CLIENT_ID,
+            client_id=unique_id,
             protocol=mqtt.MQTTv5,
         )
+        logger.info("MQTT client_id: %s", unique_id)
         _mqtt_client.username_pw_set(settings.MQTT_USERNAME, settings.MQTT_PASSWORD)
         _mqtt_client.on_connect = on_connect
+        _mqtt_client.on_disconnect = on_disconnect
         _mqtt_client.on_message = on_message
     return _mqtt_client
 
