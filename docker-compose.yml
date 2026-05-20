@@ -53,6 +53,13 @@ services:
     image: timescale/timescaledb:latest-pg16
     container_name: ai_parking_db
     restart: unless-stopped
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c work_mem=4MB
+      -c maintenance_work_mem=64MB
+      -c effective_cache_size=512MB
+      -c max_connections=100
     ports:
       - "${DB_HOST_PORT:-5480}:5432"
     environment:
