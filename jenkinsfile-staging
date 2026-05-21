@@ -1,0 +1,69 @@
+pipeline {
+    agent any
+    
+    stages {
+
+        stage('Notify Google Chat for build start') {
+            steps {
+                script {
+                    def googleChatWebhook = 'https://chat.googleapis.com/v1/spaces/AAAAezVsu8k/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=yqTBR-sDlkmHyvlgHU21UsJeyFfZFNCUqc_6GT1zzH0'
+                    def message = 'Build Started for ai_parking_central_backend-python-dev-branch-WHM\nJob URL: ' + env.BUILD_URL
+
+                    def response = httpRequest(
+                        url: googleChatWebhook,
+                        httpMode: 'POST',
+                        contentType: 'APPLICATION_JSON',
+                        requestBody: "{\"text\":\"${message}\"}"
+                    )
+
+                    echo "Google Chat Notification Response: ${response}"
+                }
+            }
+        }
+
+        stage('Checkout') {
+            steps {
+                // Checkout your Node.js project from your VCS (e.g., Git) using credentialsId 
+                checkout([$class: 'GitSCM', 
+                  branches: [[name: '*/dev']],
+                  userRemoteConfigs: [[credentialsId: ' f2341fa0-93f6-4fbc-b141-50106416346f', url: 'https://github.com/Ninjatech-DevOps/ai_parking_central_backend.git']]])
+            }
+        }
+
+        stage('Deploy to Server') {
+            steps {
+                script{
+                    sh """
+                        sudo bash -c '
+                        cd /home/aiparkingcentral/public_html/ai_parking_central_backend
+                        git status
+                        git stash
+                        git pull origin dev
+                        docker compose up -d --build 
+                        '
+                    """
+                    
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                def googleChatWebhook = 'https://chat.googleapis.com/v1/spaces/AAAAezVsu8k/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=yqTBR-sDlkmHyvlgHU21UsJeyFfZFNCUqc_6GT1zzH0'
+                def buildStatus = currentBuild.result ?: 'UNKNOWN'
+                def message = "Build ${buildStatus} for ai_parking_central_backend-python-dev-branch-WHM\nJob URL: ${env.BUILD_URL}"
+
+                def response = httpRequest(
+                    url: googleChatWebhook,
+                    httpMode: 'POST',
+                    contentType: 'APPLICATION_JSON',
+                    requestBody: "{\"text\":\"${message}\"}"
+                )
+
+                echo "Google Chat Notification Response: ${response}"
+            }
+        }
+    }
+}
