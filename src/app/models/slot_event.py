@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, ForeignKey, Enum as SAEnum, func
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,6 +27,8 @@ class SlotEvent(Base, UUIDMixin):
     device_id: Mapped["UUID"] = mapped_column(
         UUID(as_uuid=True), ForeignKey("devices.id"), nullable=True
     )
+    detected_vehicle_type: Mapped[str] = mapped_column(String(20), nullable=True)
+    is_mismatched: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     recorded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

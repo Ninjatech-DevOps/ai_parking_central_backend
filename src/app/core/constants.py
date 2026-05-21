@@ -7,6 +7,17 @@ class SlotState(str, enum.Enum):
     OBSTRUCTED = "OBSTRUCTED"
 
 
+class SlotType(str, enum.Enum):
+    CAR = "CAR"
+    TWO_WHEELER = "TWO_WHEELER"
+    GENERAL = "GENERAL"
+
+
+class VehicleType(str, enum.Enum):
+    CAR = "CAR"
+    TWO_WHEELER = "TWO_WHEELER"
+
+
 class DeviceStatus(str, enum.Enum):
     ONLINE = "ONLINE"
     OFFLINE = "OFFLINE"
@@ -67,6 +78,7 @@ class AlertTriggerType(str, enum.Enum):
     OBSTRUCTION_PATTERN = "OBSTRUCTION_PATTERN"
     DEVICE_HIGH_TEMP = "DEVICE_HIGH_TEMP"
     SYSTEM_ERROR = "SYSTEM_ERROR"
+    VEHICLE_TYPE_MISMATCH = "VEHICLE_TYPE_MISMATCH"
 
 
 class NotificationChannel(str, enum.Enum):

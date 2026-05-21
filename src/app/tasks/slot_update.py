@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 
 from src.celery_app import celery_app
-from src.app.core.constants import DeviceStatus, SlotState
+from src.app.core.constants import DeviceStatus, SlotState, VehicleType
 from src.app.db.session import get_celery_session_factory
 from src.app.models.device import Device
 from src.app.models.parking_slot import ParkingSlot
@@ -45,6 +45,12 @@ async def _process(device_id_str: str, slots: list):
 
                 new_state = SlotState(new_state_str)
 
+                # Extract vehicle type (nullable, validated)
+                raw_vtype = slot_data.get("detected_vehicle_type")
+                detected_vtype = raw_vtype if raw_vtype in [v.value for v in VehicleType] else None
+                effective_vtype = detected_vtype if new_state == SlotState.VEHICLE else None
+                is_mismatched = slot_data.get("is_mismatched", False)
+
                 # Find active slot by label within device's zone
                 query = select(ParkingSlot).where(
                     ParkingSlot.label == slot_label,
@@ -59,7 +65,7 @@ async def _process(device_id_str: str, slots: list):
                     logger.warning("Slot %s not found for device %s", slot_label, device_id_str)
                     continue
 
-                if slot.state == new_state:
+                if slot.state == new_state and slot.detected_vehicle_type == effective_vtype:
                     continue
 
                 previous_state = slot.state
@@ -67,7 +73,7 @@ async def _process(device_id_str: str, slots: list):
                 await db.execute(
                     update(ParkingSlot)
                     .where(ParkingSlot.id == slot.id)
-                    .values(state=new_state)
+                    .values(state=new_state, detected_vehicle_type=effective_vtype)
                 )
 
                 event = SlotEvent(
@@ -75,6 +81,8 @@ async def _process(device_id_str: str, slots: list):
                     previous_state=previous_state,
                     new_state=new_state,
                     device_id=device.id,
+                    detected_vehicle_type=effective_vtype,
+                    is_mismatched=is_mismatched,
                 )
                 db.add(event)
                 updated_count += 1

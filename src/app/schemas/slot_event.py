@@ -19,6 +19,8 @@ class SlotEventResponse(BaseSchema):
     previous_state: Optional[str]
     new_state: str
     device_id: Optional[uuid.UUID]
+    detected_vehicle_type: Optional[str] = None
+    is_mismatched: bool = False
     recorded_at: datetime
 
 
@@ -33,6 +35,7 @@ class ParkingSessionResponse(BaseSchema):
     city_name: Optional[str]
     camera_id: Optional[str]
     event_type: str
+    detected_vehicle_type: Optional[str] = None
     entry_time: str
     exit_time: Optional[str]
     duration_minutes: Optional[float]

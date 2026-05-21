@@ -8,7 +8,7 @@ from typing import Optional
 from sqlalchemy import select, update
 
 from src.celery_app import celery_app
-from src.app.core.constants import DeviceStatus, SlotState
+from src.app.core.constants import DeviceStatus, SlotState, VehicleType
 from src.app.db.session import get_celery_session_factory
 from src.app.models.device import Device
 from src.app.models.parking_slot import ParkingSlot
@@ -46,6 +46,12 @@ async def _process(device_id_str: str, camera_id: Optional[str], changes: list):
 
                 new_state = SlotState(new_state_str)
 
+                # Extract vehicle type (nullable, validated)
+                raw_vtype = change.get("detected_vehicle_type")
+                detected_vtype = raw_vtype if raw_vtype in [v.value for v in VehicleType] else None
+                effective_vtype = detected_vtype if new_state == SlotState.VEHICLE else None
+                is_mismatched = change.get("is_mismatched", False)
+
                 # Find active slot by label within device's zone
                 query = select(ParkingSlot).where(
                     ParkingSlot.label == slot_label,
@@ -65,7 +71,7 @@ async def _process(device_id_str: str, camera_id: Optional[str], changes: list):
                 await db.execute(
                     update(ParkingSlot)
                     .where(ParkingSlot.id == slot.id)
-                    .values(state=new_state)
+                    .values(state=new_state, detected_vehicle_type=effective_vtype)
                 )
 
                 event = SlotEvent(
@@ -73,6 +79,8 @@ async def _process(device_id_str: str, camera_id: Optional[str], changes: list):
                     previous_state=previous_state,
                     new_state=new_state,
                     device_id=device.id,
+                    detected_vehicle_type=effective_vtype,
+                    is_mismatched=is_mismatched,
                 )
                 db.add(event)
                 updated_count += 1

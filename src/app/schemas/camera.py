@@ -56,6 +56,8 @@ class CanvasSlot(BaseSchema):
     id: uuid.UUID
     label: str
     state: str
+    slot_type: str
+    detected_vehicle_type: Optional[str] = None
     polygon_coords: Optional[str]
     pos_x1: Optional[int]
     pos_y1: Optional[int]

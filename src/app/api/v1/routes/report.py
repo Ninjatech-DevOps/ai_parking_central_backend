@@ -63,6 +63,7 @@ async def _build_sessions(
             SlotEvent.id.label("entry_event_id"),
             SlotEvent.parking_slot_id,
             SlotEvent.new_state,
+            SlotEvent.detected_vehicle_type,
             SlotEvent.recorded_at.label("entry_time"),
             next_time,
             next_prev_state,
@@ -107,6 +108,7 @@ async def _build_sessions(
             "area_name": row.area_name,
             "city_name": row.city_name,
             "event_type": row.new_state,
+            "detected_vehicle_type": row.detected_vehicle_type,
             "entry_time": entry_time,
             "exit_time": exit_time,
             "duration_minutes": duration_minutes,
@@ -123,6 +125,7 @@ def _compute_summary(sessions: List[Dict[str, Any]]) -> Dict[str, Any]:
         return {
             "total_sessions": 0, "active_sessions": 0, "completed_sessions": 0,
             "vehicle_sessions": 0, "obstructed_sessions": 0,
+            "car_sessions": 0, "two_wheeler_sessions": 0,
             "avg_duration_minutes": None, "max_duration_minutes": None, "min_duration_minutes": None,
             "peak_hour": None, "peak_hour_count": 0,
             "hourly_distribution": [0] * 24,
@@ -136,6 +139,8 @@ def _compute_summary(sessions: List[Dict[str, Any]]) -> Dict[str, Any]:
     completed = total - active
     vehicles = sum(1 for s in sessions if s["event_type"] == SlotState.VEHICLE)
     obstructed = total - vehicles
+    car_sessions = sum(1 for s in sessions if s.get("detected_vehicle_type") == "CAR")
+    two_wheeler_sessions = sum(1 for s in sessions if s.get("detected_vehicle_type") == "TWO_WHEELER")
 
     # Duration stats (completed only)
     durations = [s["duration_minutes"] for s in sessions if s["duration_minutes"] is not None]
@@ -177,6 +182,8 @@ def _compute_summary(sessions: List[Dict[str, Any]]) -> Dict[str, Any]:
         "completed_sessions": completed,
         "vehicle_sessions": vehicles,
         "obstructed_sessions": obstructed,
+        "car_sessions": car_sessions,
+        "two_wheeler_sessions": two_wheeler_sessions,
         "avg_duration_minutes": avg_dur,
         "max_duration_minutes": max_dur,
         "min_duration_minutes": min_dur,
@@ -273,6 +280,7 @@ async def get_report_summary(
             "area_name": s["area_name"],
             "city_name": s["city_name"],
             "event_type": s["event_type"],
+            "detected_vehicle_type": s.get("detected_vehicle_type"),
             "entry_time": s["entry_time"].isoformat(),
             "exit_time": s["exit_time"].isoformat() if s["exit_time"] else None,
             "duration_minutes": s["duration_minutes"],
@@ -315,7 +323,7 @@ async def export_report_csv(
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Slot", "Camera", "Location", "Area", "City", "Type", "Entry Time", "Exit Time", "Duration (min)", "Status"])
+    writer.writerow(["Slot", "Camera", "Location", "Area", "City", "Type", "Vehicle Type", "Entry Time", "Exit Time", "Duration (min)", "Status"])
     for s in sessions:
         is_obs = s["event_type"] == SlotState.OBSTRUCTED
         status = ("Blocked" if is_obs else "Parked") if s["is_active"] else ("Cleared" if is_obs else "Completed")
@@ -326,6 +334,7 @@ async def export_report_csv(
             s["area_name"] or "",
             s["city_name"] or "",
             "Obstructed" if is_obs else "Vehicle",
+            s.get("detected_vehicle_type") or "",
             s["entry_time"].isoformat() if s["entry_time"] else "",
             s["exit_time"].isoformat() if s["exit_time"] else "",
             s["duration_minutes"] or "",

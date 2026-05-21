@@ -7,6 +7,8 @@ class SlotSnapshot(BaseModel):
     """Single slot in a full-state snapshot (/slots topic)."""
     slot_label: str
     state: str  # VEHICLE | EMPTY | OBSTRUCTED
+    slot_type: Optional[str] = None
+    detected_vehicle_type: Optional[str] = None
 
 
 class SlotSnapshotMessage(BaseModel):
@@ -22,6 +24,9 @@ class SlotChange(BaseModel):
     slot_label: str
     state: str  # VEHICLE | EMPTY | OBSTRUCTED
     confidence: Optional[float] = None
+    slot_type: Optional[str] = None
+    detected_vehicle_type: Optional[str] = None
+    is_mismatched: bool = False
 
 
 class SlotEventMessage(BaseModel):

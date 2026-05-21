@@ -130,7 +130,10 @@ async def get_canvas_data(
                 frame_height=cam.frame_height,
                 slots=[
                     CanvasSlot(
-                        id=s.id, label=s.label, state=s.state, polygon_coords=s.polygon_coords,
+                        id=s.id, label=s.label, state=s.state,
+                        slot_type=s.slot_type or "GENERAL",
+                        detected_vehicle_type=s.detected_vehicle_type,
+                        polygon_coords=s.polygon_coords,
                         pos_x1=s.pos_x1, pos_y1=s.pos_y1,
                         pos_x2=s.pos_x2, pos_y2=s.pos_y2,
                     ) for s in slots

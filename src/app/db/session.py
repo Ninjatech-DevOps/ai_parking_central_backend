@@ -1,4 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from src.app.core.config import settings
 
@@ -30,25 +31,20 @@ async def get_db() -> AsyncSession:
             await session.close()
 
 
-_celery_engine = None
-_celery_session_factory = None
-
-
 def get_celery_session_factory() -> async_sessionmaker:
-    """Return a cached engine + session factory for Celery tasks.
-    One engine per worker process — avoids connection pool exhaustion."""
-    global _celery_engine, _celery_session_factory
-    if _celery_session_factory is None:
-        _celery_engine = create_async_engine(
-            settings.database_url,
-            echo=settings.DB_ECHO,
-            pool_size=5,
-            max_overflow=5,
-            pool_pre_ping=True,
-        )
-        _celery_session_factory = async_sessionmaker(
-            _celery_engine,
-            class_=AsyncSession,
-            expire_on_commit=False,
-        )
-    return _celery_session_factory
+    """Create a session factory for Celery tasks using NullPool.
+
+    Each asyncio.run() in a Celery task creates a new event loop.
+    NullPool avoids holding connections across loops — each task
+    gets a fresh connection and closes it when done.
+    """
+    celery_engine = create_async_engine(
+        settings.database_url,
+        echo=settings.DB_ECHO,
+        poolclass=NullPool,
+    )
+    return async_sessionmaker(
+        celery_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
