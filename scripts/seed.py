@@ -67,6 +67,10 @@ ALL_PERMISSIONS = [
     ("ota", "view"),
     ("ota", "deploy"),
     ("ota", "rollback"),
+    ("shared_links", "view"),
+    ("shared_links", "create"),
+    ("shared_links", "edit"),
+    ("shared_links", "delete"),
 ]
 
 # Only SUPER_ADMIN is seeded as a system role.

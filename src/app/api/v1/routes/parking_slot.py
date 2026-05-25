@@ -157,6 +157,7 @@ async def delete_slot(
     slot = await service.get(slot_id)
     camera_id = slot.camera_id
     await service.delete(slot_id)
+    await db.flush()  # ensure soft-delete is visible before querying active slots
     await _push_camera_slots(db, camera_id)
     return MessageResponse(message="Parking slot deleted successfully")
 
@@ -178,6 +179,7 @@ async def _push_camera_slots(db: AsyncSession, camera_id) -> None:
     push_slots_config(device.device_id, camera.position_label, [
         {
             "label": s.label,
+            "slot_type": s.slot_type or "GENERAL",
             "polygon_coords": s.polygon_coords,
             "pos_x1": s.pos_x1, "pos_y1": s.pos_y1,
             "pos_x2": s.pos_x2, "pos_y2": s.pos_y2,

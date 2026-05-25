@@ -251,6 +251,12 @@ def stop_mqtt():
 
 def publish_command(device_id: str, topic_template: str, payload: dict):
     client = get_mqtt_client()
+    if not client.is_connected():
+        logger.error("MQTT not connected — command to %s lost: %s", device_id, topic_template)
+        return
     topic = topic_template.format(device_id=device_id)
-    client.publish(topic, json.dumps(payload), qos=settings.MQTT_QOS)
-    logger.info("Published command to %s: %s", topic, payload)
+    result = client.publish(topic, json.dumps(payload), qos=settings.MQTT_QOS)
+    if result.rc != 0:
+        logger.error("MQTT publish failed (rc=%d) to %s", result.rc, topic)
+    else:
+        logger.info("Published command to %s", topic)

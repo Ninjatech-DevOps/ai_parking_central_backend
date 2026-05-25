@@ -21,6 +21,8 @@ from src.app.api.v1.routes import (
     notification,
     role,
     report,
+    shared_link,
+    public_view,
 )
 
 api_v1_router = APIRouter(prefix="/api/v1")
@@ -45,3 +47,5 @@ api_v1_router.include_router(notification_preference.router)
 api_v1_router.include_router(notification.router)
 api_v1_router.include_router(role.router)
 api_v1_router.include_router(report.router)
+api_v1_router.include_router(shared_link.router)
+api_v1_router.include_router(public_view.router)

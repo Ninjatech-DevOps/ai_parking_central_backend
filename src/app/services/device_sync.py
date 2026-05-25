@@ -5,7 +5,7 @@ from typing import Dict, List
 
 from sqlalchemy import delete as sa_delete
 
-from src.app.core.constants import CameraStatus, SlotState
+from src.app.core.constants import CameraStatus, SlotState, SlotType
 from src.app.models.slot_event import SlotEvent
 from src.app.repositories.device import DeviceRepository
 from src.app.repositories.camera import CameraRepository
@@ -110,8 +110,10 @@ class DeviceSyncService:
             label = slot_data["label"]
             existing = await self.slot_repo.get_by_camera_and_label(camera.id, label)
 
+            slot_type = slot_data.get("slot_type", SlotType.GENERAL.value)
             update_data = {
                 "polygon_coords": slot_data.get("polygon_coords"),
+                "slot_type": slot_type,
                 "pos_x1": slot_data.get("pos_x1"),
                 "pos_y1": slot_data.get("pos_y1"),
                 "pos_x2": slot_data.get("pos_x2"),
@@ -121,7 +123,7 @@ class DeviceSyncService:
             if existing:
                 await self.slot_repo.update(existing.id, update_data)
                 updated += 1
-            elif action == "create":
+            elif action in ("create", "full_sync"):
                 await self.slot_repo.create({
                     "label": label,
                     "zone_id": device.zone_id,

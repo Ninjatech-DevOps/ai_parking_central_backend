@@ -57,6 +57,15 @@ class ScopeType(str, enum.Enum):
     ZONE = "ZONE"
 
 
+class SharedLinkScopeType(str, enum.Enum):
+    CITY = "CITY"
+    TALUKA = "TALUKA"
+    VILLAGE = "VILLAGE"
+    AREA = "AREA"
+    LOCATION = "LOCATION"
+    CAMERA = "CAMERA"
+
+
 class AlertSeverity(str, enum.Enum):
     CRITICAL = "CRITICAL"
     HIGH = "HIGH"
@@ -211,3 +220,9 @@ class Permission:
     OTA_VIEW = "ota:view"
     OTA_DEPLOY = "ota:deploy"
     OTA_ROLLBACK = "ota:rollback"
+
+    # Shared Links — CRUD (super_admin only)
+    SHARED_LINKS_VIEW = "shared_links:view"
+    SHARED_LINKS_CREATE = "shared_links:create"
+    SHARED_LINKS_EDIT = "shared_links:edit"
+    SHARED_LINKS_DELETE = "shared_links:delete"

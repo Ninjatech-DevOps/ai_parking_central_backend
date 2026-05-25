@@ -23,6 +23,7 @@ from src.app.models.alert_rule import AlertRule
 from src.app.models.alert_event import AlertEvent
 from src.app.models.notification_preference import NotificationPreference
 from src.app.models.notification_log import NotificationLog
+from src.app.models.shared_link import SharedLink
 
 __all__ = [
     "State", "City", "Taluka", "Village", "Area",
@@ -30,4 +31,5 @@ __all__ = [
     "Device", "Camera", "DeviceTelemetry", "DeviceCommand", "OTADeployment",
     "User", "Role", "Permission", "RolePermission", "UserRole", "UserScope",
     "AlertRule", "AlertEvent", "NotificationPreference", "NotificationLog",
+    "SharedLink",
 ]
