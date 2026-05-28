@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.app.api.deps import PermissionChecker, get_user_location_ids, verify_location_in_scope
 from src.app.core.constants import Permission, SlotState, DeviceStatus, AlertSeverity, AlertStatus
 from src.app.db.session import get_db
+from src.app.repositories.slot_event import SlotEventRepository
+from src.app.services.slot_event import SlotEventService
 from src.app.models.slot_event import SlotEvent
 from src.app.models.parking_slot import ParkingSlot
 from src.app.models.camera import Camera
@@ -346,4 +348,104 @@ async def export_report_csv(
         iter([output.getvalue()]),
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=parking_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"},
+    )
+
+
+@router.get("/occupancy-analysis")
+async def get_occupancy_analysis(
+    area_id: uuid.UUID = Query(None),
+    location_id: uuid.UUID = Query(None),
+    start_date: str = Query(..., description="ISO datetime"),
+    end_date: str = Query(..., description="ISO datetime"),
+    threshold: int = Query(80, ge=1, le=100),
+    slot_type: Optional[str] = Query(None, description="CAR, TWO_WHEELER, or GENERAL"),
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(PermissionChecker(Permission.REPORTS_VIEW)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
+):
+    """Peak occupancy analysis with hourly heatmap data per zone."""
+    start = datetime.fromisoformat(start_date)
+    end = datetime.fromisoformat(end_date)
+
+    if location_id:
+        verify_location_in_scope(location_id, user_location_ids)
+
+    scoped_ids = user_location_ids
+    if area_id:
+        result = await db.execute(select(Location.id).where(Location.area_id == area_id))
+        area_loc_ids = {row[0] for row in result.all()}
+        scoped_ids = (scoped_ids & area_loc_ids) if scoped_ids is not None else area_loc_ids
+
+    service = SlotEventService(SlotEventRepository(db), db)
+    return await service.compute_occupancy_analysis(
+        location_ids=scoped_ids,
+        area_id=area_id,
+        location_id=location_id,
+        start_time=start,
+        end_time=end,
+        threshold=threshold,
+        slot_type=slot_type.upper() if slot_type else None,
+    )
+
+
+@router.get("/occupancy-analysis/export-csv")
+async def export_occupancy_csv(
+    area_id: uuid.UUID = Query(None),
+    location_id: uuid.UUID = Query(None),
+    start_date: str = Query(..., description="ISO datetime"),
+    end_date: str = Query(..., description="ISO datetime"),
+    threshold: int = Query(80, ge=1, le=100),
+    slot_type: Optional[str] = Query(None, description="CAR, TWO_WHEELER, or GENERAL"),
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(PermissionChecker(Permission.REPORTS_VIEW)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
+):
+    """Export occupancy analysis as CSV with hourly columns."""
+    start = datetime.fromisoformat(start_date)
+    end = datetime.fromisoformat(end_date)
+
+    if location_id:
+        verify_location_in_scope(location_id, user_location_ids)
+
+    scoped_ids = user_location_ids
+    if area_id:
+        result = await db.execute(select(Location.id).where(Location.area_id == area_id))
+        area_loc_ids = {row[0] for row in result.all()}
+        scoped_ids = (scoped_ids & area_loc_ids) if scoped_ids is not None else area_loc_ids
+
+    service = SlotEventService(SlotEventRepository(db), db)
+    data = await service.compute_occupancy_analysis(
+        location_ids=scoped_ids,
+        area_id=area_id,
+        location_id=location_id,
+        start_time=start,
+        end_time=end,
+        threshold=threshold,
+        slot_type=slot_type.upper() if slot_type else None,
+    )
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    header = ["Zone", "Floor", "Location", "Area", "Total Slots", "Avg Occupancy %", "Avg Mismatch %"]
+    header += [f"H{h}" for h in range(24)]
+    header += ["Peak Periods", "Insight"]
+    writer.writerow(header)
+
+    for z in data["zones"]:
+        row = [
+            z["zone_name"], z["floor_label"], z["location_name"],
+            z["area_name"] or "", z["total_slots"],
+            z["avg_occupancy_pct"], z["avg_mismatch_pct"],
+        ]
+        for hb in z["hourly_breakdown"]:
+            row.append(hb["occupancy_pct"])
+        peaks_str = "; ".join(p["label"] for p in z["peak_periods"])
+        row += [peaks_str, z["insight"]]
+        writer.writerow(row)
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=occupancy_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"},
     )

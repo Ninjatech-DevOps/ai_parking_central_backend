@@ -29,6 +29,7 @@ class SlotEvent(Base, UUIDMixin):
     )
     detected_vehicle_type: Mapped[str] = mapped_column(String(20), nullable=True)
     is_mismatched: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    image_url: Mapped[str] = mapped_column(String(500), nullable=True)
     recorded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

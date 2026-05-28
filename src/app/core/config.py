@@ -91,6 +91,13 @@ class Settings(BaseSettings):
     DEFAULT_PAGE_SIZE: int = 20
     MAX_PAGE_SIZE: int = 100
 
+    # --- MinIO ---
+    MINIO_ENDPOINT: str = "api-minio.projectanddemoserver.com"
+    MINIO_ACCESS_KEY: str = ""
+    MINIO_SECRET_KEY: str = ""
+    MINIO_SECURE: bool = True
+    MINIO_BUCKET: str = "ai-parking"
+
     # --- Device ---
     DEVICE_HEARTBEAT_INTERVAL_SECONDS: int = 30
     DEVICE_OFFLINE_THRESHOLD_SECONDS: int = 300
