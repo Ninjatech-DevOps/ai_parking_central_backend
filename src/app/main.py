@@ -58,4 +58,4 @@ app.include_router(api_v1_router)
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "version": settings.APP_VERSION}
+    return {"status": "healthy 1", "version": settings.APP_VERSION}
