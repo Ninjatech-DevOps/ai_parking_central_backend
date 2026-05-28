@@ -62,3 +62,6 @@ alembic/versions/__pycache__/
 .ruff_cache/
 
 graphify-out/
+
+# Snapshots
+data/snapshots/
