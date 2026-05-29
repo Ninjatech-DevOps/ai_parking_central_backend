@@ -2,7 +2,7 @@ import uuid
 import csv
 import io
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set
 
 from fastapi import APIRouter, Depends, Query
@@ -103,6 +103,10 @@ async def _build_sessions(
         if exit_time:
             duration_minutes = round((exit_time - entry_time).total_seconds() / 60, 1)
 
+        # Convert UTC to IST (UTC+5:30) for hourly distribution
+        ist_offset = timedelta(hours=5, minutes=30)
+        ist_entry = entry_time + ist_offset
+
         sessions.append({
             "slot_label": row.slot_label,
             "camera_label": row.camera_label,
@@ -115,7 +119,7 @@ async def _build_sessions(
             "exit_time": exit_time,
             "duration_minutes": duration_minutes,
             "is_active": exit_time is None,
-            "hour": entry_time.hour,
+            "hour": ist_entry.hour,
         })
 
     return sessions
@@ -272,6 +276,29 @@ async def get_report_summary(
         elif status == AlertStatus.RESOLVED:
             alert_summary["resolved"] += count
 
+    # Current slot state counts (live snapshot)
+    slot_state_q = (
+        select(ParkingSlot.state, func.count())
+        .join(Zone, Zone.id == ParkingSlot.zone_id)
+        .join(Floor, Floor.id == Zone.floor_id)
+        .where(ParkingSlot.is_active == True)
+        .group_by(ParkingSlot.state)
+    )
+    if scoped_ids is not None:
+        slot_state_q = slot_state_q.where(Floor.location_id.in_(scoped_ids))
+    elif location_id:
+        slot_state_q = slot_state_q.where(Floor.location_id == location_id)
+    slot_state_rows = (await db.execute(slot_state_q)).all()
+    slot_counts = {"total": 0, "available": 0, "occupied": 0, "obstructed": 0}
+    for state, count in slot_state_rows:
+        slot_counts["total"] += count
+        if state == SlotState.EMPTY:
+            slot_counts["available"] += count
+        elif state == SlotState.VEHICLE:
+            slot_counts["occupied"] += count
+        elif state == SlotState.OBSTRUCTED:
+            slot_counts["obstructed"] += count
+
     # Format sessions for response (limit to 500 for display, full data in CSV)
     formatted_sessions = []
     for s in sessions[:500]:
@@ -291,6 +318,7 @@ async def get_report_summary(
 
     return {
         "summary": summary,
+        "slot_counts": slot_counts,
         "device_summary": device_summary,
         "alert_summary": alert_summary,
         "sessions": formatted_sessions,
