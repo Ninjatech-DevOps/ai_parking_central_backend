@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.api.deps import PermissionChecker, get_user_location_ids, verify_location_in_scope
-from src.app.core.constants import Permission, SlotState
+from src.app.core.constants import CommandType, Permission, SlotState
 from src.app.db.session import get_db
 from src.app.repositories.parking_slot import ParkingSlotRepository
 from src.app.repositories.slot_event import SlotEventRepository
@@ -160,6 +160,50 @@ async def delete_slot(
     await db.flush()  # ensure soft-delete is visible before querying active slots
     await _push_camera_slots(db, camera_id)
     return MessageResponse(message="Parking slot deleted successfully")
+
+
+@router.post("/{slot_id}/snapshot", status_code=201)
+async def request_slot_snapshot(
+    slot_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(PermissionChecker(Permission.SLOTS_VIEW)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
+):
+    """Request a live cropped snapshot of a specific slot from the edge device."""
+    await _verify_slot_scope(slot_id, user_location_ids, db)
+
+    slot_repo = ParkingSlotRepository(db)
+    slot = await slot_repo.get_by_id(slot_id)
+    if not slot or not slot.camera_id:
+        from src.app.exceptions.base import NotFoundException
+        raise NotFoundException(detail="Slot or camera not found")
+
+    cam_repo = CameraRepository(db)
+    camera = await cam_repo.get_by_id(slot.camera_id)
+    if not camera:
+        from src.app.exceptions.base import NotFoundException
+        raise NotFoundException(detail="Camera not found")
+
+    device = await DeviceRepository(db).get_by_id(camera.device_id)
+    if not device:
+        from src.app.exceptions.base import NotFoundException
+        raise NotFoundException(detail="Device not found")
+
+    from src.app.services.device_command import DeviceCommandService
+    from src.app.repositories.device_command import DeviceCommandRepository
+    import json
+
+    service = DeviceCommandService(
+        command_repo=DeviceCommandRepository(db),
+        device_repo=DeviceRepository(db),
+    )
+    command = await service.send_command(
+        device_uuid=device.id,
+        command_type=CommandType.SNAPSHOT,
+        payload=json.dumps({"camera_label": camera.position_label, "slot_label": slot.label}),
+        sent_by=None,
+    )
+    return {"command_id": str(command.id), "status": command.status}
 
 
 async def _push_camera_slots(db: AsyncSession, camera_id) -> None:

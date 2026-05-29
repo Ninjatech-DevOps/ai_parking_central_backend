@@ -62,3 +62,28 @@ def process_command_ack(self, device_id: str, data: dict):
     except Exception as exc:
         logger.error("Command ACK task failed, retrying: %s", exc)
         self.retry(countdown=2, exc=exc)
+
+
+async def _store_result(command_id: str, result: dict):
+    import json
+    async with get_celery_session_factory()() as db:
+        try:
+            await db.execute(
+                update(DeviceCommand)
+                .where(DeviceCommand.id == command_id)
+                .values(result=json.dumps(result))
+            )
+            await db.commit()
+            logger.info("Command %s result stored", command_id)
+        except Exception:
+            await db.rollback()
+            logger.exception("Failed to store result for command %s", command_id)
+            raise
+
+
+@celery_app.task(name="tasks.store_command_result", bind=True, max_retries=3)
+def store_command_result(self, command_id: str, result: dict):
+    try:
+        asyncio.run(_store_result(command_id, result))
+    except Exception as exc:
+        self.retry(countdown=2, exc=exc)

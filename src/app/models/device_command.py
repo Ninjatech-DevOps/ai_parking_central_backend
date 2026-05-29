@@ -36,6 +36,7 @@ class DeviceCommand(Base, UUIDMixin, TimestampMixin):
         DateTime(timezone=True), nullable=True
     )
     error_message: Mapped[str] = mapped_column(Text, nullable=True)
+    result: Mapped[str] = mapped_column(Text, nullable=True)
 
     device = relationship("Device", lazy="selectin")
     sender = relationship("User", lazy="selectin")

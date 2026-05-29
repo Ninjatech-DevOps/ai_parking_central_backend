@@ -21,6 +21,7 @@ class DeviceCommandResponse(BaseResponse):
     sent_at: datetime
     completed_at: Optional[datetime]
     error_message: Optional[str]
+    result: Optional[str] = None
 
 
 class DeviceCommandFilter(BaseSchema):

@@ -133,6 +133,12 @@ async def get_canvas_data(
                         id=s.id, label=s.label, state=s.state,
                         slot_type=s.slot_type or "GENERAL",
                         detected_vehicle_type=s.detected_vehicle_type,
+                        is_mismatched=(
+                            s.state == "VEHICLE"
+                            and (s.slot_type or "GENERAL") != "GENERAL"
+                            and s.detected_vehicle_type is not None
+                            and s.detected_vehicle_type != (s.slot_type or "GENERAL")
+                        ),
                         polygon_coords=s.polygon_coords,
                         pos_x1=s.pos_x1, pos_y1=s.pos_y1,
                         pos_x2=s.pos_x2, pos_y2=s.pos_y2,

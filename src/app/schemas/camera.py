@@ -58,6 +58,7 @@ class CanvasSlot(BaseSchema):
     state: str
     slot_type: str
     detected_vehicle_type: Optional[str] = None
+    is_mismatched: bool = False
     polygon_coords: Optional[str]
     pos_x1: Optional[int]
     pos_y1: Optional[int]

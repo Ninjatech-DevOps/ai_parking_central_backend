@@ -163,7 +163,15 @@ def _handle_cmd_result(device_id: str, payload: dict):
     action = payload.get("action")
     command_id = payload.get("command_id", "")
 
-    if action == "snapshot":
+    if action == "slot_snapshot":
+        image_url = payload.get("image_url")
+        slot_label = payload.get("slot_label")
+        if image_url and command_id:
+            from src.app.tasks.command_ack import store_command_result
+            store_command_result.delay(command_id, {"image_url": image_url, "slot_label": slot_label})
+        logger.info("Slot snapshot from %s: slot=%s url=%s cmd=%s", device_id, slot_label, image_url, command_id)
+
+    elif action == "snapshot":
         image_b64 = payload.get("image_b64")
         if not image_b64:
             logger.warning("Snapshot result from %s has no image data", device_id)
