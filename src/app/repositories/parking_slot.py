@@ -62,7 +62,26 @@ class ParkingSlotRepository(BaseRepository[ParkingSlot]):
             )
             .group_by(ParkingSlot.state)
         )
-        return {row[0]: row[1] for row in result.all()}
+        state_counts = {row[0]: row[1] for row in result.all()}
+
+        # Aggregate per-type capacity and occupied counts
+        agg_result = await self.db.execute(
+            select(
+                func.sum(ParkingSlot.capacity_car),
+                func.sum(ParkingSlot.capacity_two_wheeler),
+                func.sum(ParkingSlot.occupied_car),
+                func.sum(ParkingSlot.occupied_two_wheeler),
+            ).where(
+                ParkingSlot.zone_id == zone_id,
+                ParkingSlot.is_active == True,
+            )
+        )
+        row = agg_result.one()
+        state_counts["capacity_car"] = row[0] or 0
+        state_counts["capacity_two_wheeler"] = row[1] or 0
+        state_counts["occupied_car"] = row[2] or 0
+        state_counts["occupied_two_wheeler"] = row[3] or 0
+        return state_counts
 
     async def update_state(
         self, slot_id: uuid.UUID, state: SlotState

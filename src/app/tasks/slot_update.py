@@ -50,6 +50,8 @@ async def _process(device_id_str: str, slots: list):
                 detected_vtype = raw_vtype if raw_vtype in [v.value for v in VehicleType] else None
                 effective_vtype = detected_vtype if new_state == SlotState.VEHICLE else None
                 is_mismatched = slot_data.get("is_mismatched", False)
+                occupied_car = slot_data.get("occupied_car", 0)
+                occupied_two_wheeler = slot_data.get("occupied_two_wheeler", 0)
 
                 # Find active slot by label within device's zone
                 query = select(ParkingSlot).where(
@@ -65,7 +67,10 @@ async def _process(device_id_str: str, slots: list):
                     logger.warning("Slot %s not found for device %s", slot_label, device_id_str)
                     continue
 
-                if slot.state == new_state and slot.detected_vehicle_type == effective_vtype:
+                if (slot.state == new_state
+                        and slot.detected_vehicle_type == effective_vtype
+                        and slot.occupied_car == occupied_car
+                        and slot.occupied_two_wheeler == occupied_two_wheeler):
                     continue
 
                 previous_state = slot.state
@@ -73,7 +78,12 @@ async def _process(device_id_str: str, slots: list):
                 await db.execute(
                     update(ParkingSlot)
                     .where(ParkingSlot.id == slot.id)
-                    .values(state=new_state, detected_vehicle_type=effective_vtype)
+                    .values(
+                        state=new_state,
+                        detected_vehicle_type=effective_vtype,
+                        occupied_car=occupied_car,
+                        occupied_two_wheeler=occupied_two_wheeler,
+                    )
                 )
 
                 event = SlotEvent(

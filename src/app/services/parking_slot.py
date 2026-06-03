@@ -37,7 +37,10 @@ class ParkingSlotService:
         return await self.slot_repo.get_by_zone_id(zone_id)
 
     async def update_state(
-        self, slot_id: uuid.UUID, new_state: SlotState, device_id: uuid.UUID = None
+        self, slot_id: uuid.UUID, new_state: SlotState,
+        device_id: uuid.UUID = None,
+        occupied_car: Optional[int] = None,
+        occupied_two_wheeler: Optional[int] = None,
     ) -> Any:
         slot = await self.slot_repo.get_by_id(slot_id)
         if not slot:
@@ -52,7 +55,12 @@ class ParkingSlotService:
             "device_id": device_id,
         })
 
-        return await self.slot_repo.update_state(slot_id, new_state)
+        update_data: Dict[str, Any] = {"state": new_state}
+        if occupied_car is not None:
+            update_data["occupied_car"] = occupied_car
+        if occupied_two_wheeler is not None:
+            update_data["occupied_two_wheeler"] = occupied_two_wheeler
+        return await self.slot_repo.update(slot_id, update_data)
 
     async def get_occupancy_stats(self, zone_id: uuid.UUID) -> dict:
         return await self.slot_repo.count_by_state(zone_id)

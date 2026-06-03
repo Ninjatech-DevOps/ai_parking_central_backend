@@ -52,6 +52,8 @@ async def _process(device_id_str: str, camera_id: Optional[str], changes: list):
                 effective_vtype = detected_vtype if new_state == SlotState.VEHICLE else None
                 is_mismatched = change.get("is_mismatched", False)
                 image_url = change.get("image_url")
+                occupied_car = change.get("occupied_car", 0)
+                occupied_two_wheeler = change.get("occupied_two_wheeler", 0)
 
                 # Find active slot by label within device's zone
                 query = select(ParkingSlot).where(
@@ -72,7 +74,12 @@ async def _process(device_id_str: str, camera_id: Optional[str], changes: list):
                 await db.execute(
                     update(ParkingSlot)
                     .where(ParkingSlot.id == slot.id)
-                    .values(state=new_state, detected_vehicle_type=effective_vtype)
+                    .values(
+                        state=new_state,
+                        detected_vehicle_type=effective_vtype,
+                        occupied_car=occupied_car,
+                        occupied_two_wheeler=occupied_two_wheeler,
+                    )
                 )
 
                 event = SlotEvent(
