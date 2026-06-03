@@ -77,6 +77,7 @@ class CanvasCamera(BaseSchema):
     status: str
     frame_width: Optional[int] = None
     frame_height: Optional[int] = None
+    debug_frame_url: Optional[str] = None
     slots: List[CanvasSlot]
 
 

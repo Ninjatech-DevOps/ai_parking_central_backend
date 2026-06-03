@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.api.deps import PermissionChecker, get_user_location_ids
+from src.app.core.config import settings
 from src.app.core.constants import Permission
 from src.app.db.session import get_db
 from src.app.repositories.location import LocationRepository
@@ -121,6 +122,8 @@ async def get_canvas_data(
             if not cam.is_active:
                 continue
             slots = await slot_repo.get_by_camera_id(cam.id)
+            scheme = "https" if settings.MINIO_SECURE else "http"
+            debug_url = f"{scheme}://{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET}/debug/{device.device_id}/{cam.position_label}/latest.jpg"
             cameras_data.append(CanvasCamera(
                 id=cam.id,
                 device_id=device.id,
@@ -128,6 +131,7 @@ async def get_canvas_data(
                 status=cam.status,
                 frame_width=cam.frame_width,
                 frame_height=cam.frame_height,
+                debug_frame_url=debug_url,
                 slots=[
                     CanvasSlot(
                         id=s.id, label=s.label, state=s.state,
