@@ -225,6 +225,8 @@ async def _push_camera_slots(db: AsyncSession, camera_id) -> None:
             "label": s.label,
             "slot_type": s.slot_type or "GENERAL",
             "polygon_coords": s.polygon_coords,
+            "capacity_car": s.capacity_car or 0,
+            "capacity_two_wheeler": s.capacity_two_wheeler or 0,
             "pos_x1": s.pos_x1, "pos_y1": s.pos_y1,
             "pos_x2": s.pos_x2, "pos_y2": s.pos_y2,
         }

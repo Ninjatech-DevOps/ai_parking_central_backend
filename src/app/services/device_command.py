@@ -12,6 +12,8 @@ from src.app.repositories.device_command import DeviceCommandRepository
 COMMAND_TOPIC_MAP = {
     CommandType.RESTART: MQTTTopics.CMD_RESTART,
     CommandType.UPDATE: MQTTTopics.CMD_UPDATE,
+    CommandType.ROLLBACK: MQTTTopics.CMD_ROLLBACK,
+    CommandType.VERSION: MQTTTopics.CMD_VERSION,
     CommandType.CONFIG: MQTTTopics.CMD_CONFIG,
     CommandType.SHELL: MQTTTopics.CMD_SHELL,
     CommandType.SNAPSHOT: MQTTTopics.CMD_SNAPSHOT,

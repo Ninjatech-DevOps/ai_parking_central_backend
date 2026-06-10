@@ -129,14 +129,15 @@ def _handle_device_status(device_id: str, payload: dict):
     import time
     from src.app.tasks.device_status import process_device_status
 
-    # Skip stale retained messages (older than offline threshold)
+    # Skip stale retained OFFLINE messages only — stale "online" retained messages
+    # are still valid (device was online when it published, might still be)
     ts = payload.get("timestamp")
-    if ts and (time.time() - float(ts)) > settings.DEVICE_OFFLINE_THRESHOLD_SECONDS:
-        logger.debug("Skipping stale retained status from %s (age=%.0fs)", device_id, time.time() - float(ts))
+    status = payload.get("status", "unknown")
+    if ts and status == "offline" and (time.time() - float(ts)) > settings.DEVICE_OFFLINE_THRESHOLD_SECONDS:
+        logger.debug("Skipping stale retained offline status from %s (age=%.0fs)", device_id, time.time() - float(ts))
         return
 
-    status = payload.get("status", "unknown")
-    process_device_status.delay(device_id, status)
+    process_device_status.delay(device_id, status, float(ts) if ts else None)
     logger.info("Device %s status: %s", device_id, status)
 
 

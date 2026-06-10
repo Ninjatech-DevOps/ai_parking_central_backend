@@ -99,7 +99,7 @@ class Settings(BaseSettings):
     MINIO_BUCKET: str = "ai-parking"
 
     # --- Device ---
-    DEVICE_HEARTBEAT_INTERVAL_SECONDS: int = 30
+    DEVICE_HEARTBEAT_INTERVAL_SECONDS: int = 60
     DEVICE_OFFLINE_THRESHOLD_SECONDS: int = 300
 
     @property

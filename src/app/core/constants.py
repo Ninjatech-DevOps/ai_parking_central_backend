@@ -116,6 +116,8 @@ class RolloutStrategy(str, enum.Enum):
 class CommandType(str, enum.Enum):
     RESTART = "RESTART"
     UPDATE = "UPDATE"
+    ROLLBACK = "ROLLBACK"
+    VERSION = "VERSION"
     CONFIG = "CONFIG"
     SHELL = "SHELL"
     SNAPSHOT = "SNAPSHOT"
@@ -140,6 +142,8 @@ class MQTTTopics:
 
     CMD_RESTART = "cmd/{device_id}/restart"
     CMD_UPDATE = "cmd/{device_id}/update"
+    CMD_ROLLBACK = "cmd/{device_id}/rollback"
+    CMD_VERSION = "cmd/{device_id}/version"
     CMD_CONFIG = "cmd/{device_id}/config"
     CMD_SHELL = "cmd/{device_id}/shell"
     CMD_SNAPSHOT = "cmd/{device_id}/snapshot"

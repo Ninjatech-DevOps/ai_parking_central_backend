@@ -23,7 +23,7 @@ _STATUS_MAP = {
 }
 
 
-async def _process(device_id_str: str, status: str):
+async def _process(device_id_str: str, status: str, msg_timestamp: float = None):
     async with get_celery_session_factory()() as db:
         try:
             # FOR UPDATE to prevent race conditions with concurrent heartbeat tasks
@@ -41,6 +41,17 @@ async def _process(device_id_str: str, status: str):
             if not new_status:
                 logger.warning("Unknown status value '%s' from device %s", status, device_id_str)
                 return
+
+            # Reject out-of-order messages: if the device was seen MORE recently
+            # than this message's timestamp, skip it (Celery doesn't guarantee order)
+            if msg_timestamp and device.last_seen:
+                msg_time = datetime.fromtimestamp(msg_timestamp, tz=timezone.utc)
+                if msg_time < device.last_seen:
+                    logger.info(
+                        "Skipping out-of-order status '%s' for %s (msg_time=%s < last_seen=%s)",
+                        status, device_id_str, msg_time.isoformat(), device.last_seen.isoformat(),
+                    )
+                    return
 
             previous_status = device.status
             now = datetime.now(timezone.utc)
@@ -164,9 +175,9 @@ async def _handle_device_back_online(db, device, now):
 
 
 @celery_app.task(name="tasks.process_device_status", bind=True, max_retries=3)
-def process_device_status(self, device_id: str, status: str):
+def process_device_status(self, device_id: str, status: str, msg_timestamp: float = None):
     try:
-        asyncio.run(_process(device_id, status))
+        asyncio.run(_process(device_id, status, msg_timestamp))
     except Exception as exc:
         logger.error("Device status task failed, retrying: %s", exc)
         self.retry(countdown=2, exc=exc)

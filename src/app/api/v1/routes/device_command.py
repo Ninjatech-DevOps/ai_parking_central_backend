@@ -1,3 +1,4 @@
+import json
 import uuid
 from typing import List, Optional, Set
 
@@ -86,7 +87,8 @@ async def restart_device(
 )
 async def update_device(
     device_uuid: uuid.UUID,
-    image: str = Query(..., description="Docker image tag to deploy"),
+    branch: Optional[str] = Query(None, description="Git branch to pull (uses device default if omitted)"),
+    commit: Optional[str] = Query(None, description="Specific git commit to checkout"),
     current_user: User = Depends(get_current_user),
     service: DeviceCommandService = Depends(get_command_service),
     db: AsyncSession = Depends(get_db),
@@ -94,10 +96,63 @@ async def update_device(
     user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
 ):
     await _verify_device_scope(device_uuid, user_location_ids, db)
+    payload = {}
+    if branch:
+        payload["branch"] = branch
+    if commit:
+        payload["commit"] = commit
     return await service.send_command(
         device_uuid=device_uuid,
         command_type=CommandType.UPDATE,
-        payload=f'{{"image": "{image}"}}',
+        payload=json.dumps(payload) if payload else None,
+        sent_by=current_user.id,
+    )
+
+
+@router.post(
+    "/{device_uuid}/rollback",
+    response_model=DeviceCommandResponse,
+    status_code=201,
+)
+async def rollback_device(
+    device_uuid: uuid.UUID,
+    commit: Optional[str] = Query(None, description="Git commit to rollback to (defaults to HEAD~1)"),
+    current_user: User = Depends(get_current_user),
+    service: DeviceCommandService = Depends(get_command_service),
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(PermissionChecker(Permission.DEVICES_UPDATE)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
+):
+    await _verify_device_scope(device_uuid, user_location_ids, db)
+    payload = {}
+    if commit:
+        payload["commit"] = commit
+    return await service.send_command(
+        device_uuid=device_uuid,
+        command_type=CommandType.ROLLBACK,
+        payload=json.dumps(payload) if payload else None,
+        sent_by=current_user.id,
+    )
+
+
+@router.post(
+    "/{device_uuid}/version",
+    response_model=DeviceCommandResponse,
+    status_code=201,
+)
+async def get_device_version(
+    device_uuid: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    service: DeviceCommandService = Depends(get_command_service),
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(PermissionChecker(Permission.DEVICES_VIEW)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
+):
+    await _verify_device_scope(device_uuid, user_location_ids, db)
+    return await service.send_command(
+        device_uuid=device_uuid,
+        command_type=CommandType.VERSION,
+        payload=None,
         sent_by=current_user.id,
     )
 
