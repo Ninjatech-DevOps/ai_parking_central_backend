@@ -36,6 +36,7 @@ def on_connect(client, userdata, flags, reason_code, properties):
             (MQTTTopics.ALL_ACKS, settings.MQTT_QOS),
             (MQTTTopics.ALL_CMD_RESULTS, settings.MQTT_QOS),
             (MQTTTopics.ALL_SYNC, settings.MQTT_QOS),
+            (MQTTTopics.ALL_VEHICLE_EVENTS, settings.MQTT_QOS),
         ])
     else:
         logger.error("MQTT connect failed: %s", reason_code)
@@ -55,6 +56,7 @@ _TOPIC_HANDLERS = {
     "cmd/result": "_handle_cmd_result",
     "sync/camera": "_handle_sync_camera",
     "sync/slots": "_handle_sync_slots",
+    "vehicle_events": "_handle_vehicle_events",
 }
 
 
@@ -194,6 +196,19 @@ def _handle_cmd_result(device_id: str, payload: dict):
         logger.info("Snapshot saved: %s (%sx%s, cmd=%s)", path, width, height, command_id)
     else:
         logger.info("Command result from %s: action=%s", device_id, action)
+
+
+def _handle_vehicle_events(device_id: str, payload: dict):
+    """Dispatch vehicle entry/exit events to Celery worker."""
+    from src.app.tasks.vehicle_event import process_vehicle_events
+
+    events = payload.get("events", [])
+    if not events:
+        return
+
+    camera_id = payload.get("camera_id")
+    process_vehicle_events.delay(device_id, camera_id, events)
+    logger.info("Dispatched vehicle events from %s (%d events)", device_id, len(events))
 
 
 def _handle_sync_camera(device_id: str, payload: dict):

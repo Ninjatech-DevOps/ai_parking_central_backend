@@ -155,6 +155,9 @@ class MQTTTopics:
     SYNC_CAMERA = "parking/{device_id}/sync/camera"
     SYNC_SLOTS = "parking/{device_id}/sync/slots"
 
+    # Vehicle tracking events (multi-capacity zones)
+    VEHICLE_EVENTS = "parking/{device_id}/vehicle_events"
+
     # Wildcard subscriptions for central server
     ALL_SLOTS = "parking/+/slots"
     ALL_EVENTS = "parking/+/events"
@@ -164,6 +167,7 @@ class MQTTTopics:
     ALL_ACKS = "parking/+/ack"
     ALL_CMD_RESULTS = "parking/+/cmd/result"
     ALL_SYNC = "parking/+/sync/#"
+    ALL_VEHICLE_EVENTS = "parking/+/vehicle_events"
 
 
 # Permissions

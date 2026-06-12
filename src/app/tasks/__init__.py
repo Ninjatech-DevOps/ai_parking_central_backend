@@ -7,3 +7,4 @@ from src.app.tasks.sync_camera import process_sync_camera, update_camera_snapsho
 from src.app.tasks.sync_slots import process_sync_slots  # noqa: F401
 from src.app.tasks.device import check_device_heartbeats, process_ota_deployment  # noqa: F401
 from src.app.tasks.notifications import send_push_notification, send_email_notification, process_alert, dispatch_alert_notifications  # noqa: F401
+from src.app.tasks.vehicle_event import process_vehicle_events  # noqa: F401
