@@ -214,7 +214,9 @@ class SharedLinkService:
                         summary["obstructed"] += 1
 
                 scheme = "https" if settings.MINIO_SECURE else "http"
-                debug_url = f"{scheme}://{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET}/debug/{device.device_id}/{cam.position_label}/latest.jpg"
+                base_path = f"{scheme}://{settings.MINIO_ENDPOINT}/{settings.MINIO_BUCKET}/debug/{device.device_id}/{cam.position_label}"
+                debug_url = f"{base_path}/latest.jpg"
+                clean_url = f"{base_path}/clean.jpg"
 
                 cameras_data.append({
                     "id": cam.id,
@@ -224,6 +226,7 @@ class SharedLinkService:
                     "frame_width": cam.frame_width,
                     "frame_height": cam.frame_height,
                     "debug_frame_url": debug_url,
+                    "clean_frame_url": clean_url,
                     "slots": slot_list,
                 })
 
