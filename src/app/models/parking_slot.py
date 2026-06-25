@@ -11,7 +11,7 @@ class ParkingSlot(Base, UUIDMixin, TimestampMixin):
 
     label: Mapped[str] = mapped_column(String(20), nullable=False)
     zone_id: Mapped["UUID"] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("zones.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("zones.id"), nullable=True
     )
     camera_id: Mapped["UUID"] = mapped_column(
         UUID(as_uuid=True), ForeignKey("cameras.id"), nullable=True

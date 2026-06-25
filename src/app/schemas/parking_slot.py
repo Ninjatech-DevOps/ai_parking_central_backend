@@ -7,7 +7,7 @@ from src.app.schemas.base import BaseSchema, BaseResponse
 
 class ParkingSlotCreate(BaseSchema):
     label: str
-    zone_id: uuid.UUID
+    zone_id: Optional[uuid.UUID] = None
     camera_id: Optional[uuid.UUID] = None
     state: SlotState = SlotState.EMPTY
     slot_type: SlotType = SlotType.GENERAL
@@ -36,8 +36,8 @@ class ParkingSlotUpdate(BaseSchema):
 
 class ParkingSlotResponse(BaseResponse):
     label: str
-    zone_id: uuid.UUID
-    camera_id: Optional[uuid.UUID]
+    zone_id: Optional[uuid.UUID] = None
+    camera_id: Optional[uuid.UUID] = None
     state: str
     slot_type: str
     capacity_car: int = 0
