@@ -16,6 +16,8 @@ class LocationCreate(BaseSchema):
     longitude: Optional[float] = None
     location_type: LocationType = LocationType.OPEN
     total_capacity: int = 0
+    total_car_slots: int = 0
+    total_two_wheeler_slots: int = 0
 
 
 class LocationUpdate(BaseSchema):
@@ -26,6 +28,8 @@ class LocationUpdate(BaseSchema):
     longitude: Optional[float] = None
     location_type: Optional[LocationType] = None
     total_capacity: Optional[int] = None
+    total_car_slots: Optional[int] = None
+    total_two_wheeler_slots: Optional[int] = None
     is_active: Optional[bool] = None
 
 
@@ -40,4 +44,6 @@ class LocationResponse(BaseResponse):
     longitude: Optional[float]
     location_type: str
     total_capacity: int
+    total_car_slots: int = 0
+    total_two_wheeler_slots: int = 0
     is_active: bool

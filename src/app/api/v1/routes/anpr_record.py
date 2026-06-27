@@ -1,0 +1,215 @@
+import uuid
+import csv
+import io
+from datetime import datetime, timedelta
+from typing import Optional, Set
+
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.app.api.deps import PermissionChecker, get_user_location_ids, verify_location_in_scope
+from src.app.core.constants import Permission
+from src.app.db.session import get_db
+from src.app.models.location import Location
+from src.app.repositories.anpr_record import AnprRecordRepository
+from src.app.schemas.anpr_record import AnprRecordResponse
+from src.app.schemas.base import PaginatedResponse
+from src.app.services.anpr_record import AnprRecordService
+from src.app.utils.export import generate_excel, generate_pdf_with_images
+from src.app.utils.pagination import build_paginated_response, get_pagination_params
+
+router = APIRouter(prefix="/anpr-records", tags=["ANPR Records"])
+
+
+def _ev(v) -> str:
+    """Extract .value from enum, or return str as-is."""
+    return v.value if hasattr(v, "value") else str(v)
+
+
+def _get_service(db: AsyncSession = Depends(get_db)) -> AnprRecordService:
+    return AnprRecordService(AnprRecordRepository(db))
+
+
+def _parse_date(date_str: Optional[str]) -> Optional[datetime]:
+    return datetime.fromisoformat(date_str) if date_str else None
+
+
+@router.get("/search-plates")
+async def search_plates(
+    q: str = Query(..., min_length=1, description="Number plate search query"),
+    limit: int = Query(10, ge=1, le=50),
+    service: AnprRecordService = Depends(_get_service),
+    _: bool = Depends(PermissionChecker(Permission.ANPR_VIEW)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
+):
+    """Autocomplete endpoint for number plate search."""
+    plates = await service.search_plates(q, user_location_ids, limit)
+    return {"plates": plates}
+
+
+@router.get("", response_model=PaginatedResponse[AnprRecordResponse])
+async def list_records(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    location_id: Optional[uuid.UUID] = Query(None),
+    number_plate: Optional[str] = Query(None),
+    vehicle_type: Optional[str] = Query(None, description="CAR or TWO_WHEELER"),
+    direction: Optional[str] = Query(None, description="IN or OUT"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    service: AnprRecordService = Depends(_get_service),
+    _: bool = Depends(PermissionChecker(Permission.ANPR_VIEW)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
+):
+    if location_id:
+        verify_location_in_scope(location_id, user_location_ids)
+
+    skip, limit = get_pagination_params(page, page_size)
+    start = _parse_date(start_date)
+    end = _parse_date(end_date)
+
+    items = await service.get_filtered(
+        skip, limit, location_id, user_location_ids, number_plate, vehicle_type, direction, start, end
+    )
+    total = await service.count_filtered(
+        location_id, user_location_ids, number_plate, vehicle_type, direction, start, end
+    )
+
+    response_items = []
+    for record in items:
+        resp = AnprRecordResponse.model_validate(record)
+        if record.location:
+            resp.location_name = record.location.name
+        response_items.append(resp)
+
+    return build_paginated_response(response_items, total, page, limit)
+
+
+@router.get("/export-csv")
+async def export_records_csv(
+    location_id: Optional[uuid.UUID] = Query(None),
+    number_plate: Optional[str] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    service: AnprRecordService = Depends(_get_service),
+    _: bool = Depends(PermissionChecker(Permission.ANPR_EXPORT)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
+):
+    start = _parse_date(start_date)
+    end = _parse_date(end_date)
+
+    items = await service.get_filtered(
+        0, 50000, location_id, user_location_ids, number_plate, None, None, start, end
+    )
+
+    ist = timedelta(hours=5, minutes=30)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Date", "Time", "Number Plate", "Vehicle Type", "Direction",
+        "Gemini Result", "PaddleOCR Result", "Location",
+    ])
+    for r in items:
+        dt = r.recorded_at + ist
+        writer.writerow([
+            dt.strftime("%d %b %Y"),
+            dt.strftime("%I:%M %p"),
+            r.number_plate,
+            _ev(r.vehicle_type),
+            _ev(r.direction),
+            r.gemini_result or "",
+            r.paddle_result or "",
+            r.location.name if r.location else "",
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=anpr_records_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"},
+    )
+
+
+@router.get("/export-excel")
+async def export_records_excel(
+    location_id: Optional[uuid.UUID] = Query(None),
+    number_plate: Optional[str] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    service: AnprRecordService = Depends(_get_service),
+    _: bool = Depends(PermissionChecker(Permission.ANPR_EXPORT)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
+):
+    start = _parse_date(start_date)
+    end = _parse_date(end_date)
+    items = await service.get_filtered(
+        0, 50000, location_id, user_location_ids, number_plate, None, None, start, end
+    )
+
+    ist = timedelta(hours=5, minutes=30)
+    headers = ["Date", "Time", "Number Plate", "Vehicle Type", "Direction",
+               "Gemini Result", "PaddleOCR Result", "Location"]
+    rows = []
+    for r in items:
+        dt = r.recorded_at + ist
+        rows.append([
+            dt.strftime("%d %b %Y"),
+            dt.strftime("%I:%M %p"),
+            r.number_plate,
+            _ev(r.vehicle_type),
+            _ev(r.direction),
+            r.gemini_result or "",
+            r.paddle_result or "",
+            r.location.name if r.location else "",
+        ])
+
+    output = generate_excel("ANPR Records", headers, rows, "anpr_records")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=anpr_records_{ts}.xlsx"},
+    )
+
+
+@router.get("/export-pdf")
+async def export_records_pdf(
+    location_id: Optional[uuid.UUID] = Query(None),
+    number_plate: Optional[str] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    service: AnprRecordService = Depends(_get_service),
+    _: bool = Depends(PermissionChecker(Permission.ANPR_EXPORT)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
+):
+    start = _parse_date(start_date)
+    end = _parse_date(end_date)
+    items = await service.get_filtered(
+        0, 5000, location_id, user_location_ids, number_plate, None, None, start, end
+    )
+
+    ist = timedelta(hours=5, minutes=30)
+    records = []
+    for r in items:
+        records.append({
+            "image_url": r.image_url or "",
+            "fields": [
+                ("Date", (r.recorded_at + ist).strftime("%d %b %Y")),
+                ("Time", (r.recorded_at + ist).strftime("%I:%M %p")),
+                ("Number Plate", r.number_plate),
+                ("Vehicle Type", _ev(r.vehicle_type)),
+                ("Direction", _ev(r.direction)),
+                ("Gemini Result", r.gemini_result or "-"),
+                ("PaddleOCR Result", r.paddle_result or "-"),
+                ("Location", r.location.name if r.location else "-"),
+            ],
+        })
+
+    output = generate_pdf_with_images("ANPR Records Report", records)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return StreamingResponse(
+        output,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=anpr_records_{ts}.pdf"},
+    )

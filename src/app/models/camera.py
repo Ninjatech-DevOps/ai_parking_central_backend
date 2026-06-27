@@ -2,7 +2,7 @@ from sqlalchemy import String, Float, Integer, Boolean, ForeignKey, Enum as SAEn
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.app.core.constants import CameraStatus, CameraType
+from src.app.core.constants import CameraModuleType, CameraStatus, CameraType
 from src.app.db.base import Base, UUIDMixin, TimestampMixin
 
 
@@ -23,6 +23,12 @@ class Camera(Base, UUIDMixin, TimestampMixin):
         nullable=False,
         default=CameraStatus.ACTIVE,
     )
+    module_type: Mapped[str] = mapped_column(
+        SAEnum(CameraModuleType, name="camera_module_type_enum"),
+        nullable=False,
+        default=CameraModuleType.AI_PARKING,
+        server_default="AI_PARKING",
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     detection_interval: Mapped[float] = mapped_column(Float, nullable=True, default=30.0)
 
@@ -35,3 +41,4 @@ class Camera(Base, UUIDMixin, TimestampMixin):
 
     device = relationship("Device", back_populates="cameras", lazy="selectin")
     slots = relationship("ParkingSlot", back_populates="camera", lazy="selectin")
+    anpr_config = relationship("AnprCameraConfig", back_populates="camera", uselist=False, lazy="selectin")

@@ -24,6 +24,10 @@ from src.app.models.alert_event import AlertEvent
 from src.app.models.notification_preference import NotificationPreference
 from src.app.models.notification_log import NotificationLog
 from src.app.models.shared_link import SharedLink
+from src.app.models.anpr_camera_config import AnprCameraConfig
+from src.app.models.anpr_record import AnprRecord
+from src.app.models.anpr_session import AnprSession
+from src.app.models.parking_scan import ParkingScan
 
 __all__ = [
     "State", "City", "Taluka", "Village", "Area",
@@ -32,4 +36,6 @@ __all__ = [
     "User", "Role", "Permission", "RolePermission", "UserRole", "UserScope",
     "AlertRule", "AlertEvent", "NotificationPreference", "NotificationLog",
     "SharedLink",
+    "AnprCameraConfig", "AnprRecord", "AnprSession",
+    "ParkingScan",
 ]

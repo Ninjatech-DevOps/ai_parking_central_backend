@@ -23,6 +23,11 @@ from src.app.api.v1.routes import (
     report,
     shared_link,
     public_view,
+    anpr_camera_config,
+    anpr_record,
+    anpr_session,
+    anpr_dashboard,
+    parking_history,
 )
 
 api_v1_router = APIRouter(prefix="/api/v1")
@@ -49,3 +54,8 @@ api_v1_router.include_router(role.router)
 api_v1_router.include_router(report.router)
 api_v1_router.include_router(shared_link.router)
 api_v1_router.include_router(public_view.router)
+api_v1_router.include_router(anpr_camera_config.router)
+api_v1_router.include_router(anpr_record.router)
+api_v1_router.include_router(anpr_session.router)
+api_v1_router.include_router(anpr_dashboard.router)
+api_v1_router.include_router(parking_history.router)

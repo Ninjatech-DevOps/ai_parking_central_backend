@@ -8,3 +8,6 @@ from src.app.tasks.sync_slots import process_sync_slots  # noqa: F401
 from src.app.tasks.device import check_device_heartbeats, process_ota_deployment  # noqa: F401
 from src.app.tasks.notifications import send_push_notification, send_email_notification, process_alert, dispatch_alert_notifications  # noqa: F401
 from src.app.tasks.vehicle_event import process_vehicle_events  # noqa: F401
+from src.app.tasks.anpr_record import process_anpr_record  # noqa: F401
+from src.app.tasks.anpr_sync import process_anpr_config_sync  # noqa: F401
+from src.app.tasks.parking_scan import create_parking_scan  # noqa: F401

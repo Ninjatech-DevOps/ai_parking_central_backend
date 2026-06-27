@@ -18,6 +18,11 @@ class VehicleType(str, enum.Enum):
     TWO_WHEELER = "TWO_WHEELER"
 
 
+class AnprDirection(str, enum.Enum):
+    IN = "IN"
+    OUT = "OUT"
+
+
 class DeviceStatus(str, enum.Enum):
     ONLINE = "ONLINE"
     OFFLINE = "OFFLINE"
@@ -29,6 +34,11 @@ class CameraType(str, enum.Enum):
     CSI = "CSI"
     RTSP = "RTSP"
     USB = "USB"
+
+
+class CameraModuleType(str, enum.Enum):
+    AI_PARKING = "AI_PARKING"
+    ANPR = "ANPR"
 
 
 class CameraStatus(str, enum.Enum):
@@ -158,6 +168,11 @@ class MQTTTopics:
     # Vehicle tracking events (multi-capacity zones)
     VEHICLE_EVENTS = "parking/{device_id}/vehicle_events"
 
+    # ANPR topics
+    ANPR_RECORD = "anpr/{device_id}/record"
+    ANPR_SYNC_CONFIG = "anpr/{device_id}/sync/config"
+    ANPR_CMD_CONFIG = "anpr/{device_id}/cmd/config"
+
     # Wildcard subscriptions for central server
     ALL_SLOTS = "parking/+/slots"
     ALL_EVENTS = "parking/+/events"
@@ -168,6 +183,10 @@ class MQTTTopics:
     ALL_CMD_RESULTS = "parking/+/cmd/result"
     ALL_SYNC = "parking/+/sync/#"
     ALL_VEHICLE_EVENTS = "parking/+/vehicle_events"
+
+    # ANPR wildcard subscriptions
+    ALL_ANPR_RECORDS = "anpr/+/record"
+    ALL_ANPR_SYNC = "anpr/+/sync/#"
 
 
 # Permissions
@@ -228,6 +247,11 @@ class Permission:
     OTA_VIEW = "ota:view"
     OTA_DEPLOY = "ota:deploy"
     OTA_ROLLBACK = "ota:rollback"
+
+    # ANPR — view + export
+    ANPR_VIEW = "anpr:view"
+    ANPR_CONFIGURE = "anpr:configure"
+    ANPR_EXPORT = "anpr:export"
 
     # Shared Links — CRUD (super_admin only)
     SHARED_LINKS_VIEW = "shared_links:view"

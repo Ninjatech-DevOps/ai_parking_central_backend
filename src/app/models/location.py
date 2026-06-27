@@ -33,6 +33,8 @@ class Location(Base, UUIDMixin, TimestampMixin):
         default=LocationType.OPEN,
     )
     total_capacity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_car_slots: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    total_two_wheeler_slots: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     area = relationship("Area", back_populates="locations", lazy="selectin")

@@ -37,6 +37,9 @@ def on_connect(client, userdata, flags, reason_code, properties):
             (MQTTTopics.ALL_CMD_RESULTS, settings.MQTT_QOS),
             (MQTTTopics.ALL_SYNC, settings.MQTT_QOS),
             (MQTTTopics.ALL_VEHICLE_EVENTS, settings.MQTT_QOS),
+            # ANPR topics
+            (MQTTTopics.ALL_ANPR_RECORDS, settings.MQTT_QOS),
+            (MQTTTopics.ALL_ANPR_SYNC, settings.MQTT_QOS),
         ])
     else:
         logger.error("MQTT connect failed: %s", reason_code)
@@ -72,8 +75,14 @@ def on_message(client, userdata, msg):
             logger.warning("No device_id in message on %s", topic)
             return
 
+        # ANPR topics: anpr/{device_id}/record, anpr/{device_id}/sync/config
+        if topic.startswith("anpr/"):
+            if "/sync/" in topic:
+                handler_name = "_handle_anpr_sync"
+            else:
+                handler_name = "_handle_anpr_record"
         # Multi-level suffix topics: parking/{id}/sync/camera, parking/{id}/cmd/result
-        if "/sync/" in topic:
+        elif "/sync/" in topic:
             sync_type = topic.rsplit("/", 1)[-1]
             handler_name = _TOPIC_HANDLERS.get(f"sync/{sync_type}")
         elif "/cmd/" in topic:
@@ -230,6 +239,22 @@ def _handle_sync_slots(device_id: str, payload: dict):
     slots = payload.get("slots", [])
     process_sync_slots.delay(device_id, action, camera_label, slots)
     logger.info("Dispatched slots sync from %s: %s %s (%d slots)", device_id, action, camera_label, len(slots))
+
+
+def _handle_anpr_record(device_id: str, payload: dict):
+    """Dispatch ANPR record to Celery worker."""
+    from src.app.tasks.anpr_record import process_anpr_record
+
+    process_anpr_record.delay(device_id, payload)
+    logger.info("Dispatched ANPR record from %s: plate=%s", device_id, payload.get("number_plate"))
+
+
+def _handle_anpr_sync(device_id: str, payload: dict):
+    """Dispatch ANPR config sync to Celery worker."""
+    from src.app.tasks.anpr_sync import process_anpr_config_sync
+
+    process_anpr_config_sync.delay(device_id, payload)
+    logger.info("Dispatched ANPR config sync from %s", device_id)
 
 
 def get_mqtt_client() -> mqtt.Client:

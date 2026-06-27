@@ -71,6 +71,9 @@ ALL_PERMISSIONS = [
     ("shared_links", "create"),
     ("shared_links", "edit"),
     ("shared_links", "delete"),
+    ("anpr", "view"),
+    ("anpr", "configure"),
+    ("anpr", "export"),
 ]
 
 # Only SUPER_ADMIN is seeded as a system role.

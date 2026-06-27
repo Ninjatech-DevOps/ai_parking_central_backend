@@ -101,6 +101,12 @@ async def _process(device_id_str: str, camera_id: Optional[str], changes: list):
                     device_id_str, updated_count, camera_id,
                 )
 
+                # Create a ParkingScan record for history
+                if camera_id:
+                    from src.app.tasks.parking_scan import create_parking_scan
+                    image_url = changes[0].get("image_url", "") if changes else ""
+                    create_parking_scan.delay(device_id_str, camera_id, image_url)
+
         except Exception:
             await db.rollback()
             logger.exception("Failed to process slot events for %s", device_id_str)
