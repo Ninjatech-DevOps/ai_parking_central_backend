@@ -42,4 +42,3 @@ fpdf2>=2.8.0
 
 # Utilities
 python-multipart>=0.0.9
-openpyxl
