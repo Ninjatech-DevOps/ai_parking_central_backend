@@ -207,11 +207,14 @@ async def export_scans_pdf(
             "fields": [
                 ("Date", _fmt_date(s.recorded_at)),
                 ("Time", _fmt_time(s.recorded_at)),
-                ("Car Occupied / Available / Total", f"{s.car_occupied} / {s.car_available} / {s.car_total}"),
-                ("2W Occupied / Available / Total", f"{s.two_wheeler_occupied} / {s.two_wheeler_available} / {s.two_wheeler_total}"),
-                ("Obstruction", "Yes" if s.has_obstruction else "No"),
                 ("Location", s.location.name if s.location else "-"),
                 ("Camera", s.camera.position_label if s.camera else "-"),
+                ("Car Occ", str(s.car_occupied)),
+                ("Car Avail", str(s.car_available)),
+                ("Car Total", str(s.car_total)),
+                ("2W Occ", str(s.two_wheeler_occupied)),
+                ("2W Avail", str(s.two_wheeler_available)),
+                ("2W Total", str(s.two_wheeler_total)),
             ],
         })
 

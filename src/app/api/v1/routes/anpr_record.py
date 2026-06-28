@@ -210,11 +210,11 @@ async def export_records_pdf(
             "fields": [
                 ("Date", (r.recorded_at + ist).strftime("%d %b %Y")),
                 ("Time", (r.recorded_at + ist).strftime("%I:%M %p")),
-                ("Number Plate", r.number_plate),
-                ("Vehicle Type", _ev(r.vehicle_type)),
+                ("Plate", r.number_plate),
+                ("Type", _ev(r.vehicle_type)),
                 ("Direction", _ev(r.direction)),
-                ("Gemini Result", r.gemini_result or "-"),
-                ("PaddleOCR Result", r.paddle_result or "-"),
+                ("Gemini", r.gemini_result or "-"),
+                ("Paddle", r.paddle_result or "-"),
                 ("Location", r.location.name if r.location else "-"),
             ],
         })

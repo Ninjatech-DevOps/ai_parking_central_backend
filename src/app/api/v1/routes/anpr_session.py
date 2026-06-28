@@ -203,11 +203,11 @@ async def export_sessions_pdf(
         records.append({
             "image_url": s.entry_image_url or "",
             "fields": [
-                ("Number Plate", s.number_plate),
-                ("Vehicle Type", _ev(s.vehicle_type)),
+                ("Plate", s.number_plate),
+                ("Type", _ev(s.vehicle_type)),
                 ("Date", (s.entry_time + ist).strftime("%d %b %Y")),
-                ("In Time", (s.entry_time + ist).strftime("%I:%M %p")),
-                ("Out Time", (s.exit_time + ist).strftime("%d %b %Y, %I:%M %p") if s.exit_time else "Still Parked"),
+                ("In", (s.entry_time + ist).strftime("%I:%M %p")),
+                ("Out", (s.exit_time + ist).strftime("%d %b, %I:%M %p") if s.exit_time else "Still Parked"),
                 ("Duration", duration or "Active"),
                 ("Status", "Active" if s.is_active else "Completed"),
                 ("Location", s.location.name if s.location else "-"),
