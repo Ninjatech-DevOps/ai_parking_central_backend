@@ -26,7 +26,7 @@ MQTT_USERNAME = "admin"
 MQTT_PASSWORD = "Broker@123"
 
 DEVICE_ID = "RPI-001"  # Must match a device_id in the DB
-CAMERA_LABEL = "camera-sb-40-44"  # Must match a camera position_label on this device
+CAMERA_LABEL = "ccl"  # Must match a camera position_label on this device
 
 # Interval between events (seconds)
 MIN_INTERVAL = 5

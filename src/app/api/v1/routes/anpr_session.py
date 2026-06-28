@@ -6,11 +6,13 @@ from typing import Optional, Set
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.api.deps import PermissionChecker, get_user_location_ids, verify_location_in_scope
 from src.app.core.constants import Permission
 from src.app.db.session import get_db
+from src.app.models.location import Location
 from src.app.repositories.anpr_session import AnprSessionRepository
 from src.app.schemas.anpr_session import AnprSessionResponse
 from src.app.schemas.base import PaginatedResponse
@@ -34,10 +36,19 @@ def _parse_date(date_str: Optional[str]) -> Optional[datetime]:
     return datetime.fromisoformat(date_str) if date_str else None
 
 
+async def _resolve_scope(area_id, user_location_ids, db):
+    if not area_id:
+        return user_location_ids
+    result = await db.execute(sa_select(Location.id).where(Location.area_id == area_id))
+    area_loc_ids = {row[0] for row in result.all()}
+    return (user_location_ids & area_loc_ids) if user_location_ids is not None else area_loc_ids
+
+
 @router.get("", response_model=PaginatedResponse[AnprSessionResponse])
 async def list_sessions(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    area_id: Optional[uuid.UUID] = Query(None),
     location_id: Optional[uuid.UUID] = Query(None),
     number_plate: Optional[str] = Query(None),
     vehicle_type: Optional[str] = Query(None, description="CAR or TWO_WHEELER"),
@@ -47,19 +58,21 @@ async def list_sessions(
     service: AnprSessionService = Depends(_get_service),
     _: bool = Depends(PermissionChecker(Permission.ANPR_VIEW)),
     user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
+    db: AsyncSession = Depends(get_db),
 ):
     if location_id:
         verify_location_in_scope(location_id, user_location_ids)
+    scoped_ids = await _resolve_scope(area_id, user_location_ids, db)
 
     skip, limit = get_pagination_params(page, page_size)
     start = _parse_date(start_date)
     end = _parse_date(end_date)
 
     items = await service.get_filtered(
-        skip, limit, location_id, user_location_ids, number_plate, vehicle_type, is_active, start, end
+        skip, limit, location_id, scoped_ids, number_plate, vehicle_type, is_active, start, end
     )
     total = await service.count_filtered(
-        location_id, user_location_ids, number_plate, vehicle_type, is_active, start, end
+        location_id, scoped_ids, number_plate, vehicle_type, is_active, start, end
     )
 
     response_items = []

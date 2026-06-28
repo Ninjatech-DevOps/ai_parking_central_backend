@@ -158,7 +158,7 @@ async def seed(db_url: str):
             elif direction == "OUT" and plate in active_sessions:
                 session = active_sessions.pop(plate)
                 session.exit_record_id = record.id
-                session.exit_time = recorded_at + timedelta(minutes=random.uniform(15, 480))
+                session.exit_time = session.entry_time + timedelta(minutes=random.uniform(15, 480))
                 session.exit_image_url = record.image_url
                 session.is_active = False
 

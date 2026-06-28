@@ -173,7 +173,11 @@ class MQTTTopics:
     ANPR_SYNC_CONFIG = "anpr/{device_id}/sync/config"
     ANPR_CMD_CONFIG = "anpr/{device_id}/cmd/config"
 
+    # Parking scan (history row from client)
+    PARKING_SCAN = "parking/{device_id}/scan"
+
     # Wildcard subscriptions for central server
+    ALL_PARKING_SCANS = "parking/+/scan"
     ALL_SLOTS = "parking/+/slots"
     ALL_EVENTS = "parking/+/events"
     ALL_HEARTBEATS = "parking/+/heartbeat"

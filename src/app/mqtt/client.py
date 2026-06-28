@@ -28,6 +28,7 @@ def on_connect(client, userdata, flags, reason_code, properties):
     if reason_code == 0:
         logger.info("MQTT connected. Subscribing to topics...")
         client.subscribe([
+            (MQTTTopics.ALL_PARKING_SCANS, settings.MQTT_QOS),
             (MQTTTopics.ALL_SLOTS, settings.MQTT_QOS),
             (MQTTTopics.ALL_EVENTS, settings.MQTT_QOS),
             (MQTTTopics.ALL_HEARTBEATS, settings.MQTT_QOS),
@@ -50,6 +51,7 @@ def on_disconnect(client, userdata, flags, reason_code, properties):
 
 
 _TOPIC_HANDLERS = {
+    "scan": "_handle_parking_scan",
     "slots": "_handle_slot_snapshot",
     "events": "_handle_slot_events",
     "heartbeat": "_handle_heartbeat",
@@ -239,6 +241,14 @@ def _handle_sync_slots(device_id: str, payload: dict):
     slots = payload.get("slots", [])
     process_sync_slots.delay(device_id, action, camera_label, slots)
     logger.info("Dispatched slots sync from %s: %s %s (%d slots)", device_id, action, camera_label, len(slots))
+
+
+def _handle_parking_scan(device_id: str, payload: dict):
+    """Dispatch parking scan (history row) to Celery worker."""
+    from src.app.tasks.parking_scan import process_parking_scan
+
+    process_parking_scan.delay(device_id, payload)
+    logger.info("Dispatched parking scan from %s", device_id)
 
 
 def _handle_anpr_record(device_id: str, payload: dict):

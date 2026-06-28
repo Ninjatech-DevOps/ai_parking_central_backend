@@ -22,5 +22,6 @@ class ParkingScanResponse(BaseSchema):
     recorded_at: datetime
     location_name: Optional[str] = None
     camera_label: Optional[str] = None
+    device_name: Optional[str] = None
 
     model_config = {"from_attributes": True}

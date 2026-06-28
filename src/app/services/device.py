@@ -5,6 +5,9 @@ from src.app.core.constants import DeviceStatus
 from src.app.exceptions.base import ConflictException, NotFoundException
 from src.app.repositories.device import DeviceRepository
 from src.app.repositories.location import LocationRepository
+from src.app.repositories.base import BaseRepository
+from src.app.models.camera import Camera
+from src.app.models.parking_slot import ParkingSlot
 
 
 class DeviceService:
@@ -68,4 +71,13 @@ class DeviceService:
         device = await self.device_repo.get_by_id(id)
         if not device:
             raise NotFoundException(detail="Device not found")
-        return await self.device_repo.update(id, {"is_active": False})
+
+        # Unassign slots from this device's cameras, then delete cameras
+        from sqlalchemy import select, update, delete as sa_delete
+        db = self.device_repo.db
+        for cam in (device.cameras or []):
+            await db.execute(update(ParkingSlot).where(ParkingSlot.camera_id == cam.id).values(camera_id=None))
+            await db.execute(sa_delete(Camera).where(Camera.id == cam.id))
+        await db.flush()
+
+        return await self.device_repo.delete(id)
