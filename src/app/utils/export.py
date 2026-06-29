@@ -958,16 +958,18 @@ def _count_table(pdf, x, y, w, h, title, accent, occupied, available, total):
     pdf.set_fill_color(*accent)
     pdf.rect(x, y, w, 1.4, "F")                       # top accent line
 
-    # Vehicle icon + title centered
+    # Vehicle icon + title centered and vertically aligned
     is_car = title.strip().lower().startswith("car")
-    pdf.set_font("Helvetica", "B", 9.5)
+    s = 0.7
+    pdf.set_font("Helvetica", "B", 9)
     text_w = pdf.get_string_width(title)
-    icon_w = 7
-    group_w = icon_w + 2 + text_w
+    icon_w = 7 * s
+    gap = 1.5
+    group_w = icon_w + gap + text_w
     gx = x + (w - group_w) / 2
-    icy = y + 7.5
-    _draw_vehicle_icon(pdf, gx, icy, is_car, accent, s=0.8)
-    _txt(pdf, gx + icon_w + 2, y + 3.4, text_w + 4, title, size=9.5, style="B", color=accent, h=6)
+    icy = y + 7.2
+    _draw_vehicle_icon(pdf, gx, icy, is_car, accent, s=s)
+    _txt(pdf, gx + icon_w + gap, icy - 2.5, text_w + 4, title, size=9, style="B", color=accent, h=5)
 
     hy = y + 11.5
     _txt(pdf, x + 5, hy, w * 0.5, "STATUS", size=6, style="B", color=SLATE_400)
@@ -1113,10 +1115,10 @@ def generate_parking_history_pdf(items: list, title: str = "AI Parking History R
             _txt(pdf, M + 5, y + 2.4, W * 0.6, it.get("location") or "-", size=10, style="B", color=SLATE_900)
             _txt(pdf, M + 4, y + 2.4, W - 8, it.get("datetime") or "-", size=8.5, style="B", color=SLATE_500, align="R")
 
-            # Content row: image (left ~72%) + count tables (right ~28%)
+            # Content row: image (left ~80%) + count tables (right ~20%)
             cy = y + header_h + 2
             ix = M + 4
-            iw = W * 0.70
+            iw = W * 0.78
 
             # Image
             drawn = False
