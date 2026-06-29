@@ -1111,12 +1111,12 @@ def generate_parking_history_pdf(items: list, title: str = "AI Parking History R
             _txt(pdf, M + 5, y + 2.4, W * 0.6, it.get("location") or "-", size=10, style="B", color=SLATE_900)
             _txt(pdf, M + 4, y + 2.4, W - 8, it.get("datetime") or "-", size=8.5, style="B", color=SLATE_500, align="R")
 
-            # Content: image left ~78%, count tables right
+            # Content: image left ~76%, count tables right (flush, no gap)
             cy = y + header_h + 2
-            ix = M + 4
-            iw = W * 0.78
-            rx = ix + iw + 5
-            rw = (M + W) - rx - 4
+            ix = M + 3
+            iw = W * 0.76
+            rx = ix + iw + 1
+            rw = (M + W) - rx - 2
 
             # Image
             drawn = False
