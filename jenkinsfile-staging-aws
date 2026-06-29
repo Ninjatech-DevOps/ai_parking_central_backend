@@ -1,0 +1,81 @@
+pipeline {
+    agent any
+    
+    stages {
+
+        stage('Notify Google Chat for build start') {
+            steps {
+                script {
+                    def googleChatWebhook = 'https://chat.googleapis.com/v1/spaces/AAAAezVsu8k/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=yqTBR-sDlkmHyvlgHU21UsJeyFfZFNCUqc_6GT1zzH0'
+                    def message = 'Build Started for ai_parking_central_backend-dev-branch\nJob URL: ' + env.BUILD_URL
+
+                    def response = httpRequest(
+                        url: googleChatWebhook,
+                        httpMode: 'POST',
+                        contentType: 'APPLICATION_JSON',
+                        requestBody: "{\"text\":\"${message}\"}"
+                    )
+
+                    echo "Google Chat Notification Response: ${response}"
+                }
+            }
+        }
+
+        stage('Build the Application') {
+            steps {
+                script{
+                    sshagent(credentials: ['ai_parking_central_backend-key-hostinger']) {
+                    def serverIP = '187.127.187.159'
+                    def sshUser = 'root'
+                    def imageName = "ai_parking_api:${BUILD_NUMBER}"
+                    sh """
+                        ssh -o StrictHostKeyChecking=no ${sshUser}@${serverIP} /bin/sh << EOF
+                        cd /home/root/ai_parking_central_backend
+                        git status
+                        git stash
+                        git pull
+EOF
+                    """
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to server') {
+            steps {
+                script{
+                    sshagent(credentials: ['ai_parking_central_backend-key-hostinger']) {
+                    def serverIP = '187.127.187.159'
+                    def sshUser = 'root'
+                    def imageName = "ai_parking_api:${BUILD_NUMBER}"
+                    sh """
+                        ssh -o StrictHostKeyChecking=no ${sshUser}@${serverIP} /bin/sh << EOF
+                        cd /home/root/ai_parking_central_backend
+                        docker compose up -d --build
+EOF
+                    """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                def googleChatWebhook = 'https://chat.googleapis.com/v1/spaces/AAAAezVsu8k/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=yqTBR-sDlkmHyvlgHU21UsJeyFfZFNCUqc_6GT1zzH0'
+                def buildStatus = currentBuild.result ?: 'UNKNOWN'
+                def message = "Build ${buildStatus} for ai_parking_central_backend-dev-branch\nJob URL: ${env.BUILD_URL}"
+
+                def response = httpRequest(
+                    url: googleChatWebhook,
+                    httpMode: 'POST',
+                    contentType: 'APPLICATION_JSON',
+                    requestBody: "{\"text\":\"${message}\"}"
+                )
+
+                echo "Google Chat Notification Response: ${response}"
+            }
+        }
+    }
+}
