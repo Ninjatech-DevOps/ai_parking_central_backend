@@ -1,8 +1,11 @@
+import logging
 import uuid
 from typing import Optional, Set
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger("ai_parking.routes.anpr_config")
 
 from src.app.api.deps import PermissionChecker, get_user_location_ids
 from src.app.core.constants import MQTTTopics, Permission
@@ -97,16 +100,23 @@ async def delete_config(
 
 
 def _publish_config_to_device(db, config):
-    """Best-effort publish config sync to device."""
+    """Best-effort publish ANPR config (ROI/trigger line) to device via MQTT."""
     try:
         if config.camera and config.camera.device:
             device_id = config.camera.device.device_id
-            publish_command(device_id, MQTTTopics.ANPR_CMD_CONFIG, {
-                "action": "upsert",
+            payload = {
+                "action": "UPDATE",
                 "camera_id": str(config.camera_id),
                 "roi_coords": config.roi_coords,
                 "trigger_line": config.trigger_line,
                 "direction": config.direction.value if hasattr(config.direction, "value") else config.direction,
-            })
+                "is_active": config.is_active,
+            }
+            topic = MQTTTopics.ANPR_CMD_CONFIG.format(device_id=device_id)
+            publish_command(device_id, MQTTTopics.ANPR_CMD_CONFIG, payload)
+            logger.info("ANPR config UPDATE published to %s: camera_id=%s roi=%s line=%s",
+                        topic, config.camera_id, bool(config.roi_coords), bool(config.trigger_line))
+        else:
+            logger.warning("ANPR config publish skipped — camera or device relationship not loaded for config %s", config.id)
     except Exception:
-        pass
+        logger.exception("Failed to publish ANPR config to device for config %s", config.id)

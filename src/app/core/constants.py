@@ -172,6 +172,7 @@ class MQTTTopics:
     ANPR_RECORD = "anpr/{device_id}/record"
     ANPR_SYNC_CONFIG = "anpr/{device_id}/sync/config"
     ANPR_CMD_CONFIG = "anpr/{device_id}/cmd/config"
+    ANPR_ACK = "anpr/{device_id}/ack"
 
     # Parking scan (history row from client)
     PARKING_SCAN = "parking/{device_id}/scan"
