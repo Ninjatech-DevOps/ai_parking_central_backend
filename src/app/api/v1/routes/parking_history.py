@@ -19,7 +19,7 @@ from src.app.repositories.parking_scan import ParkingScanRepository
 from src.app.schemas.parking_scan import ParkingScanResponse
 from src.app.schemas.base import PaginatedResponse
 from src.app.services.parking_scan import ParkingScanService
-from src.app.utils.export import generate_excel, generate_pdf_with_images
+from src.app.utils.export import generate_excel, generate_parking_history_pdf
 from src.app.utils.pagination import build_paginated_response, get_pagination_params
 
 router = APIRouter(prefix="/parking-history", tags=["Parking History"])
@@ -212,24 +212,17 @@ async def export_scans_pdf(
     records = []
     for s in items:
         records.append({
-            # Use the clean frame (slot polylines only) — not the debug frame
-            # which also overlays vehicle-detection boxes on cars.
+            # Combined Date & Time
+            "datetime": f"{_fmt_date(s.recorded_at)}, {_fmt_time(s.recorded_at)}",
+            "location": s.location.name if s.location else "-",
+            "camera": s.camera.position_label if s.camera else "-",
+            # Clean frame (slot polylines only) — not the debug frame with car boxes.
             "image_url": _clean_frame_url(s.image_url),
-            "fields": [
-                ("Date", _fmt_date(s.recorded_at)),
-                ("Time", _fmt_time(s.recorded_at)),
-                ("Location", s.location.name if s.location else "-"),
-                ("Camera", s.camera.position_label if s.camera else "-"),
-                ("Car Occupied", str(s.car_occupied)),
-                ("Car Available", str(s.car_available)),
-                ("Car Total", str(s.car_total)),
-                ("2-Wheeler Occupied", str(s.two_wheeler_occupied)),
-                ("2-Wheeler Available", str(s.two_wheeler_available)),
-                ("2-Wheeler Total", str(s.two_wheeler_total)),
-            ],
+            "car": {"o": s.car_occupied, "a": s.car_available, "t": s.car_total},
+            "tw": {"o": s.two_wheeler_occupied, "a": s.two_wheeler_available, "t": s.two_wheeler_total},
         })
 
-    output = generate_pdf_with_images("AI Parking History Report", records)
+    output = generate_parking_history_pdf(records, "AI Parking History Report")
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return StreamingResponse(
         output,

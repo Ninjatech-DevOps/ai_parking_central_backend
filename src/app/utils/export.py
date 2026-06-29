@@ -225,110 +225,106 @@ class ParkingPDF(FPDF):
         self.cell(95, 8, "AI Parking Management System", align="L")
         self.cell(95, 8, f"Page {self.page_no()}/{{nb}}", align="R")
 
+    def _wrap_text(self, text, w, font_size, style="B"):
+        """Split text into lines fitting width `w` (hard-splits over-long words)."""
+        self.set_font("Helvetica", style, font_size)
+        words = str(text).split()
+        lines, cur = [], ""
+        for word in words:
+            trial = (cur + " " + word).strip()
+            if self.get_string_width(trial) <= w - 1:
+                cur = trial
+                continue
+            if cur:
+                lines.append(cur)
+                cur = ""
+            if self.get_string_width(word) > w - 1:
+                part = ""
+                for ch in word:
+                    if self.get_string_width(part + ch) > w - 1 and part:
+                        lines.append(part)
+                        part = ch
+                    else:
+                        part += ch
+                cur = part
+            else:
+                cur = word
+        if cur:
+            lines.append(cur)
+        return lines or ["-"]
+
     def _draw_card(self, fields: List[tuple], image_url: str = "", record_num: int = 0):
-        """Draw a record card with real image (70%) and data (30%). 2 cards per page."""
+        """Record card: image on the left (~70%), data on the right (~30%).
+
+        The image is aspect-fit inside its panel; the data column uses a stacked
+        label-over-value layout with wrapping, so labels and values are never cut.
+        """
         card_x = 10
         card_w = 190
-        img_w = 84  # image left; wide data column on the right (values wrap, never cut)
-        field_row_h = 8
-        num_fields = len(fields)
-        # Target: 2 cards per page. Usable height ~255 (297 - header 22 - footer 12 - margins 8)
-        # Each card ~124mm with 3mm gap
         card_h = 124
-        img_h = card_h - 12
+        pad = 5
+        gap = 6
+        inner_w = card_w - 2 * pad - gap
+        img_w = round(inner_w * 0.70)            # 70% image
+        data_w = inner_w - img_w                  # 30% data
+        img_h = card_h - 16
 
         if self.get_y() + card_h > 275:
             self.add_page()
-
         card_y = self.get_y()
 
         # Card background
-        self.set_fill_color(*SLATE_100)
+        self.set_fill_color(*WHITE)
         self.set_draw_color(*SLATE_300)
+        self.set_line_width(0.2)
         self.rect(card_x, card_y, card_w, card_h, "FD")
 
-        # Record number badge
+        # Record number badge (top-left)
         self.set_fill_color(*TEAL)
         self.set_font("Helvetica", "B", 7)
         self.set_text_color(*WHITE)
-        self.set_xy(card_x + 2, card_y + 2)
-        self.cell(8, 5, f"#{record_num}", align="C", fill=True)
+        self.set_xy(card_x + pad, card_y + 3)
+        self.cell(9, 5, f"#{record_num}", align="C", fill=True)
 
-        # Number plate badge (if present)
-        plate_val = None
-        for lbl, val in fields:
-            if lbl == "Number Plate" and val and str(val) not in ("-", "N/A"):
-                plate_val = str(val)
-                break
-        if plate_val:
-            self.set_xy(card_x + 12, card_y + 1.5)
-            self.set_fill_color(*TEAL)
-            self.set_font("Helvetica", "B", 9)
-            self.set_text_color(*WHITE)
-            pw = self.get_string_width(f"  {plate_val}  ") + 2
-            self.cell(pw, 6, f"  {plate_val}  ", align="C", fill=True)
-
-        # Image (left side) — download and embed real image
-        img_x = card_x + 4
+        # ── Image panel (left ~70%) — aspect-fit, centered, NO border ──
+        img_x = card_x + pad
         img_y = card_y + 10
         img_path = _download_image(image_url)
-
+        drawn = False
         if img_path:
             try:
-                self.image(img_path, img_x, img_y, img_w, img_h)
-                # Border around image
-                self.set_draw_color(*SLATE_300)
-                self.rect(img_x, img_y, img_w, img_h, "D")
+                self.image(img_path, x=img_x, y=img_y, w=img_w, h=img_h, keep_aspect_ratio=True)
+                drawn = True
+            except TypeError:  # older fpdf without keep_aspect_ratio
+                try:
+                    self.image(img_path, img_x, img_y, img_w, img_h)
+                    drawn = True
+                except Exception:
+                    drawn = False
             except Exception:
-                self._draw_image_placeholder(img_x, img_y, img_w, img_h)
-        else:
+                drawn = False
+        if not drawn:
             self._draw_image_placeholder(img_x, img_y, img_w, img_h)
 
-        # Data fields (right side) — uniform font, full labels, values WRAP (never cut)
-        data_x = card_x + img_w + 6
-        label_w = 34
-        gap = 3
-        value_w = (card_x + card_w) - (data_x + label_w + gap) - 4
-        line_h = 6.2
+        # ── Data panel (right ~30%) — stacked label / value, wrapped (never cut) ──
+        data_x = img_x + img_w + gap
+        label_h = 4.8
+        val_line_h = 5.0
+        field_gap = 1.4
 
-        def _wrap_value(text, w):
-            """Split text into lines that fit width `w` (hard-splits long words)."""
-            self.set_font("Helvetica", "B", 9)
-            words = str(text).split()
-            lines, cur = [], ""
-            for word in words:
-                trial = (cur + " " + word).strip()
-                if self.get_string_width(trial) <= w - 1:
-                    cur = trial
-                    continue
-                if cur:
-                    lines.append(cur)
-                    cur = ""
-                # word alone may still exceed width — hard-split it
-                if self.get_string_width(word) > w - 1:
-                    part = ""
-                    for ch in word:
-                        if self.get_string_width(part + ch) > w - 1 and part:
-                            lines.append(part)
-                            part = ch
-                        else:
-                            part += ch
-                    cur = part
-                else:
-                    cur = word
-            if cur:
-                lines.append(cur)
-            return lines or ["-"]
-
-        wrapped = [_wrap_value(v if v not in (None, "") else "-", value_w) for _, v in fields]
-        total_h = sum(len(w) for w in wrapped) * line_h
-        cy = card_y + max(10, (card_h - total_h) / 2)
-
-        for (label, value), lines in zip(fields, wrapped):
+        prepared = []
+        for label, value in fields:
             val_str = str(value) if value not in (None, "") else "-"
+            lines = self._wrap_text(val_str, data_w, 9.5, "B")
+            prepared.append((label, val_str, lines))
+
+        total_h = sum(label_h + len(lines) * val_line_h + field_gap for _, _, lines in prepared) - field_gap
+        cy = card_y + max(6, (card_h - total_h) / 2)
+
+        for label, val_str, lines in prepared:
             color = SLATE_900
             if val_str in ("-", "N/A"):
-                color = SLATE_300
+                color = SLATE_400
             elif val_str in ("Active", "Still Parked", "IN"):
                 color = TEAL
             elif val_str in ("Completed",):
@@ -336,21 +332,23 @@ class ParkingPDF(FPDF):
             elif val_str in ("OUT", "Yes"):
                 color = RED
 
-            # Label aligned with the value's first line
+            # Label (uppercase, muted)
             self.set_xy(data_x, cy)
             self.set_font("Helvetica", "B", 8)
             self.set_text_color(*SLATE_500)
-            self.cell(label_w, line_h, _fit_text(self, label, label_w), align="R")
+            self.cell(data_w, label_h, _fit_text(self, _latin1(str(label)).upper(), data_w), align="L")
+            cy += label_h
 
-            # Value lines (wrapped)
-            self.set_font("Helvetica", "B", 9)
+            # Value (bold, wrapped)
+            self.set_font("Helvetica", "B", 9.5)
             self.set_text_color(*color)
-            for j, ln in enumerate(lines):
-                self.set_xy(data_x + label_w + gap, cy + j * line_h)
-                self.cell(value_w, line_h, ln, align="L")
-            cy += len(lines) * line_h
+            for ln in lines:
+                self.set_xy(data_x, cy)
+                self.cell(data_w, val_line_h, ln, align="L")
+                cy += val_line_h
+            cy += field_gap
 
-        self.set_y(card_y + card_h + 3)
+        self.set_y(card_y + card_h + 4)
 
     def _draw_image_placeholder(self, x, y, w, h):
         """Draw a gray placeholder when image is unavailable."""
@@ -871,6 +869,270 @@ def generate_pdf_with_images(
                 image_url=record.get("image_url", ""),
                 record_num=idx,
             )
+
+        output = io.BytesIO()
+        pdf.output(output)
+        output.seek(0)
+        return output
+    finally:
+        _cleanup_image_cache()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Live Parking Status PDF — mirrors the public/shared "view" page design:
+# summary cards (Cars / Two-Wheeler) on top, then per-camera image cards.
+# ─────────────────────────────────────────────────────────────────────────────
+def _tint(color, f=0.86):
+    """Lighten a color toward white by factor f (0..1)."""
+    return tuple(int(ci + (255 - ci) * f) for ci in color)
+
+
+def _draw_vehicle_icon(pdf, ix, cy, is_car, color):
+    """Small car / two-wheeler icon, vertically centered on cy. Width ~7mm."""
+    pdf.set_draw_color(*color)
+    pdf.set_fill_color(*color)
+    if is_car:
+        pdf.set_line_width(0.3)
+        pdf.rect(ix, cy - 0.6, 7, 2.4, "F", round_corners=True, corner_radius=0.7)   # body
+        pdf.rect(ix + 1.7, cy - 2.4, 3.4, 2.0, "F", round_corners=True, corner_radius=0.6)  # cabin
+        pdf.ellipse(ix + 0.8, cy + 1.4, 1.7, 1.7, "F")                                # wheels
+        pdf.ellipse(ix + 4.5, cy + 1.4, 1.7, 1.7, "F")
+    else:
+        pdf.set_line_width(0.45)
+        pdf.ellipse(ix, cy + 0.2, 2.8, 2.8, "D")          # rear wheel
+        pdf.ellipse(ix + 4.2, cy + 0.2, 2.8, 2.8, "D")    # front wheel
+        pdf.line(ix + 1.4, cy + 1.6, ix + 4.0, cy - 0.6)  # frame
+        pdf.line(ix + 4.0, cy - 0.6, ix + 5.6, cy + 1.6)
+        pdf.line(ix + 4.0, cy - 0.6, ix + 5.2, cy - 0.8)  # handlebar
+
+
+def _summary_card(pdf, x, y, w, h, title, accent, occupied, available, total):
+    """Count card matching the UI: tinted card, centered title + icon, 3 divided columns."""
+    pdf.set_fill_color(*_tint(accent, 0.93))
+    pdf.set_draw_color(*_tint(accent, 0.55))
+    pdf.set_line_width(0.2)
+    try:
+        pdf.rect(x, y, w, h, "FD", round_corners=True, corner_radius=2.5)
+    except TypeError:
+        pdf.rect(x, y, w, h, "FD")
+
+    header_h = 11.5
+    # Centered title + vehicle icon
+    pdf.set_font("Helvetica", "B", 13)
+    text_w = pdf.get_string_width(title)
+    icon_w = 7.5
+    group_w = icon_w + 2.5 + text_w
+    gx = x + (w - group_w) / 2
+    icy = y + header_h / 2
+    _draw_vehicle_icon(pdf, gx, icy, title.strip().lower().startswith("car"), accent)
+    _txt(pdf, gx + icon_w + 2.5, icy - 3.2, text_w + 6, title, size=13, style="B", color=accent, h=6)
+
+    # Divider under header
+    pdf.set_draw_color(*_tint(accent, 0.5))
+    pdf.set_line_width(0.2)
+    pdf.line(x + 3, y + header_h, x + w - 3, y + header_h)
+
+    # Three columns (label on top, big number below), separated by vertical dividers
+    sy = y + header_h
+    sh = h - header_h
+    col_w = w / 3
+    for i, (lbl, val, c) in enumerate([
+        ("OCCUPIED", occupied, RED), ("AVAILABLE", available, EMERALD), ("TOTAL", total, accent),
+    ]):
+        cx = x + i * col_w
+        if i > 0:
+            pdf.set_draw_color(*_tint(accent, 0.5))
+            pdf.line(cx, sy + 2.5, cx, y + h - 2.5)
+        _txt(pdf, cx, sy + sh * 0.22, col_w, lbl, size=6.5, style="B", color=SLATE_500, align="C", h=4)
+        _txt(pdf, cx, sy + sh * 0.5, col_w, str(val), size=15, style="B", color=c, align="C", h=8)
+
+
+def _count_table(pdf, x, y, w, h, title, accent, occupied, available, total):
+    """A 'Cars' / 'Two Wheeler' count card: title + Status/Count rows."""
+    pdf.set_fill_color(*WHITE)
+    pdf.set_draw_color(*SLATE_300)
+    pdf.set_line_width(0.2)
+    pdf.rect(x, y, w, h, "FD")
+    pdf.set_fill_color(*accent)
+    pdf.rect(x, y, w, 1.4, "F")                       # top accent line
+    pdf.rect(x + 4, y + 4, 4.5, 4.5, "F")             # icon chip
+    _txt(pdf, x, y + 3.4, w, title, size=9.5, style="B", color=accent, align="C", h=6)
+
+    hy = y + 11.5
+    _txt(pdf, x + 5, hy, w * 0.5, "STATUS", size=6, style="B", color=SLATE_400)
+    _txt(pdf, x, hy, w - 5, "COUNT", size=6, style="B", color=SLATE_400, align="R")
+
+    ry = hy + 5
+    row_h = (y + h - ry - 2) / 3
+    for i, (lbl, val, c) in enumerate([
+        ("Occupied", occupied, RED), ("Available", available, EMERALD), ("Total", total, accent),
+    ]):
+        cy = ry + i * row_h
+        if i > 0:
+            pdf.set_draw_color(*SLATE_100)
+            pdf.set_line_width(0.2)
+            pdf.line(x + 4, cy, x + w - 4, cy)
+        _txt(pdf, x + 5, cy + row_h / 2 - 2.3, w * 0.6, lbl, size=8.5, color=SLATE_700, h=4)
+        _txt(pdf, x, cy + row_h / 2 - 2.7, w - 5, str(val), size=12, style="B", color=c, align="R", h=5)
+
+
+def generate_public_view_pdf(view: dict) -> io.BytesIO:
+    """Live parking status report: summary cards + per-camera image cards."""
+    try:
+        pdf = ParkingPDF(view.get("name") or "Live Parking Status", orientation="P")
+        pdf.alias_nb_pages()
+        pdf.set_auto_page_break(False)
+        M = 10
+        W = pdf.w - 2 * M
+        pdf.add_page()
+
+        _txt(pdf, M, 20, W, "LIVE PARKING STATUS", size=8, style="B", color=SLATE_400)
+
+        # ── Summary cards (Cars / Two-Wheeler) ──
+        s = view["summary"]
+        y = 26
+        cw = (W - 6) / 2
+        _summary_card(pdf, M, y, cw, 34, "Cars", BLUE,
+                      s["car_occupied"], s["car_available"], s["car_total"])
+        _summary_card(pdf, M + cw + 6, y, cw, 34, "Two Wheeler", INDIGO,
+                      s["tw_occupied"], s["tw_available"], s["tw_total"])
+        y += 34 + 7
+
+        # ── Per-camera image cards ──
+        cameras = view.get("cameras", [])
+        if not cameras:
+            _txt(pdf, M, y + 6, W, "No camera feeds available.", size=10, color=SLATE_400)
+
+        for cam in cameras:
+            content_h = 86
+            card_h = 11.5 + content_h + 5
+            if y + card_h > pdf.h - 14:
+                pdf.add_page()
+                y = 26
+
+            pdf.set_fill_color(*WHITE)
+            pdf.set_draw_color(*SLATE_300)
+            pdf.set_line_width(0.2)
+            pdf.rect(M, y, W, card_h, "FD")
+
+            # Header strip (camera label + location)
+            pdf.set_fill_color(*TEAL_50)
+            pdf.rect(M, y, W, 9.5, "F")
+            pdf.set_fill_color(*TEAL)
+            pdf.rect(M, y, 1.6, 9.5, "F")
+            _txt(pdf, M + 4, y + 2.4, W * 0.6, cam.get("label") or "Camera", size=10, style="B", color=SLATE_900)
+            _txt(pdf, M + 4, y + 2.4, W - 8, cam.get("location_name") or "", size=8, color=SLATE_500, align="R")
+
+            # Content row: image (left ~64%) + Cars / Two-Wheeler tables (right)
+            cy = y + 12
+            ix = M + 4
+            iw = W * 0.62
+            rx = ix + iw + 5
+            rw = (M + W) - rx - 4
+
+            img = _download_image(cam.get("image_url"))
+            drawn = False
+            if img:
+                try:
+                    pdf.image(img, x=ix, y=cy, w=iw, h=content_h, keep_aspect_ratio=True)
+                    drawn = True
+                except TypeError:
+                    try:
+                        pdf.image(img, ix, cy, iw, content_h)
+                        drawn = True
+                    except Exception:
+                        drawn = False
+                except Exception:
+                    drawn = False
+            if not drawn:
+                pdf._draw_image_placeholder(ix, cy, iw, content_h)
+
+            # Right: two stacked count tables
+            t_gap = 4
+            t_h = (content_h - t_gap) / 2
+            car, tw = cam["car"], cam["tw"]
+            _count_table(pdf, rx, cy, rw, t_h, "Cars", BLUE, car["o"], car["a"], car["t"])
+            _count_table(pdf, rx, cy + t_h + t_gap, rw, t_h, "Two Wheeler", INDIGO, tw["o"], tw["a"], tw["t"])
+
+            y += card_h + 6
+
+        output = io.BytesIO()
+        pdf.output(output)
+        output.seek(0)
+        return output
+    finally:
+        _cleanup_image_cache()
+
+
+def generate_parking_history_pdf(items: list, title: str = "AI Parking History Report") -> io.BytesIO:
+    """One card per scan: detection details as cards on top, full-width image below.
+
+    Each item: {datetime, location, camera, image_url, car:{o,a,t}, tw:{o,a,t}}.
+    """
+    try:
+        pdf = ParkingPDF(title, orientation="P")
+        pdf.alias_nb_pages()
+        pdf.set_auto_page_break(False)
+        M = 10
+        W = pdf.w - 2 * M
+        pdf.add_page()
+        _txt(pdf, M, 20, W, f"Total Records: {len(items)}", size=9, color=SLATE_500)
+        y = 27
+
+        for it in items:
+            img_h = 104
+            counts_h = 30
+            card_h = 10 + 7 + counts_h + 4 + img_h + 6
+            if y + card_h > pdf.h - 14:
+                pdf.add_page()
+                y = 22
+
+            pdf.set_fill_color(*WHITE)
+            pdf.set_draw_color(*SLATE_300)
+            pdf.set_line_width(0.2)
+            pdf.rect(M, y, W, card_h, "FD")
+
+            # Header strip: #idx + location (left), date & time (right)
+            pdf.set_fill_color(*TEAL_50)
+            pdf.rect(M, y, W, 10, "F")
+            pdf.set_fill_color(*TEAL)
+            pdf.rect(M, y, 1.6, 10, "F")
+            _txt(pdf, M + 5, y + 2.9, W * 0.6, it.get("location") or "-", size=10, style="B", color=SLATE_900)
+            _txt(pdf, M + 4, y + 2.9, W - 8, it.get("datetime") or "-", size=8.5, style="B", color=SLATE_500, align="R")
+
+            # Camera sub-line
+            _txt(pdf, M + 4, y + 11.2, W - 8, f"Camera:  {it.get('camera') or '-'}", size=8, style="B", color=SLATE_500)
+
+            # Detection detail cards (Cars / Two-Wheeler) — inset from the card border
+            cy = y + 17
+            ipad = 4
+            cgap = 6
+            cw = (W - 2 * ipad - cgap) / 2
+            car, tw = it["car"], it["tw"]
+            _summary_card(pdf, M + ipad, cy, cw, counts_h, "Cars", BLUE, car["o"], car["a"], car["t"])
+            _summary_card(pdf, M + ipad + cw + cgap, cy, cw, counts_h, "Two Wheeler", INDIGO, tw["o"], tw["a"], tw["t"])
+
+            # Full-width image below
+            iy = cy + counts_h + 4
+            ix, iw = M + 4, W - 8
+            img = _download_image(it.get("image_url"))
+            drawn = False
+            if img:
+                try:
+                    pdf.image(img, x=ix, y=iy, w=iw, h=img_h, keep_aspect_ratio=True)
+                    drawn = True
+                except TypeError:
+                    try:
+                        pdf.image(img, ix, iy, iw, img_h)
+                        drawn = True
+                    except Exception:
+                        drawn = False
+                except Exception:
+                    drawn = False
+            if not drawn:
+                pdf._draw_image_placeholder(ix, iy, iw, img_h)
+
+            y += card_h + 6
 
         output = io.BytesIO()
         pdf.output(output)
