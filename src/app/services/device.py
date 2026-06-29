@@ -5,9 +5,6 @@ from src.app.core.constants import DeviceStatus
 from src.app.exceptions.base import ConflictException, NotFoundException
 from src.app.repositories.device import DeviceRepository
 from src.app.repositories.location import LocationRepository
-from src.app.repositories.base import BaseRepository
-from src.app.models.camera import Camera
-from src.app.models.parking_slot import ParkingSlot
 
 
 class DeviceService:
@@ -72,12 +69,22 @@ class DeviceService:
         if not device:
             raise NotFoundException(detail="Device not found")
 
-        # Unassign slots from this device's cameras, then delete cameras
-        from sqlalchemy import select, update, delete as sa_delete
+        # Clear all FK references via raw SQL, then delete device
+        from sqlalchemy import text
         db = self.device_repo.db
-        for cam in (device.cameras or []):
-            await db.execute(update(ParkingSlot).where(ParkingSlot.camera_id == cam.id).values(camera_id=None))
-            await db.execute(sa_delete(Camera).where(Camera.id == cam.id))
+        did = str(device.id)
+
+        await db.execute(text("DELETE FROM notification_logs WHERE alert_event_id IN (SELECT id FROM alert_events WHERE device_id = :did)"), {"did": did})
+        await db.execute(text("DELETE FROM alert_events WHERE device_id = :did"), {"did": did})
+        await db.execute(text("DELETE FROM anpr_sessions WHERE entry_record_id IN (SELECT id FROM anpr_records WHERE device_id = :did)"), {"did": did})
+        await db.execute(text("DELETE FROM anpr_records WHERE device_id = :did"), {"did": did})
+        await db.execute(text("DELETE FROM anpr_camera_configs WHERE camera_id IN (SELECT id FROM cameras WHERE device_id = :did)"), {"did": did})
+        await db.execute(text("DELETE FROM parking_scans WHERE device_id = :did"), {"did": did})
+        await db.execute(text("DELETE FROM slot_events WHERE device_id = :did"), {"did": did})
+        await db.execute(text("DELETE FROM device_telemetry WHERE device_id = :did"), {"did": did})
+        await db.execute(text("DELETE FROM device_commands WHERE device_id = :did"), {"did": did})
+        await db.execute(text("UPDATE parking_slots SET camera_id = NULL WHERE camera_id IN (SELECT id FROM cameras WHERE device_id = :did)"), {"did": did})
+        await db.execute(text("DELETE FROM cameras WHERE device_id = :did"), {"did": did})
         await db.flush()
 
         return await self.device_repo.delete(id)
