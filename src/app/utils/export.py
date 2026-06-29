@@ -56,6 +56,7 @@ def _download_image(url: str) -> Optional[str]:
         return None
     if url in _image_cache:
         return _image_cache[url]
+
     try:
         resp = requests.get(url, timeout=8, stream=True)
         if resp.status_code != 200:
@@ -887,23 +888,23 @@ def _tint(color, f=0.86):
     return tuple(int(ci + (255 - ci) * f) for ci in color)
 
 
-def _draw_vehicle_icon(pdf, ix, cy, is_car, color):
-    """Small car / two-wheeler icon, vertically centered on cy. Width ~7mm."""
+def _draw_vehicle_icon(pdf, ix, cy, is_car, color, s=1.0):
+    """Car / two-wheeler icon, vertically centered on cy. Base width ~7mm * s."""
     pdf.set_draw_color(*color)
     pdf.set_fill_color(*color)
     if is_car:
-        pdf.set_line_width(0.3)
-        pdf.rect(ix, cy - 0.6, 7, 2.4, "F", round_corners=True, corner_radius=0.7)   # body
-        pdf.rect(ix + 1.7, cy - 2.4, 3.4, 2.0, "F", round_corners=True, corner_radius=0.6)  # cabin
-        pdf.ellipse(ix + 0.8, cy + 1.4, 1.7, 1.7, "F")                                # wheels
-        pdf.ellipse(ix + 4.5, cy + 1.4, 1.7, 1.7, "F")
+        pdf.set_line_width(0.3 * s)
+        pdf.rect(ix, cy - 0.6 * s, 7 * s, 2.4 * s, "F", round_corners=True, corner_radius=0.7 * s)
+        pdf.rect(ix + 1.7 * s, cy - 2.4 * s, 3.4 * s, 2.0 * s, "F", round_corners=True, corner_radius=0.6 * s)
+        pdf.ellipse(ix + 0.8 * s, cy + 1.4 * s, 1.7 * s, 1.7 * s, "F")
+        pdf.ellipse(ix + 4.5 * s, cy + 1.4 * s, 1.7 * s, 1.7 * s, "F")
     else:
-        pdf.set_line_width(0.45)
-        pdf.ellipse(ix, cy + 0.2, 2.8, 2.8, "D")          # rear wheel
-        pdf.ellipse(ix + 4.2, cy + 0.2, 2.8, 2.8, "D")    # front wheel
-        pdf.line(ix + 1.4, cy + 1.6, ix + 4.0, cy - 0.6)  # frame
-        pdf.line(ix + 4.0, cy - 0.6, ix + 5.6, cy + 1.6)
-        pdf.line(ix + 4.0, cy - 0.6, ix + 5.2, cy - 0.8)  # handlebar
+        pdf.set_line_width(0.5 * s)
+        pdf.ellipse(ix, cy + 0.2 * s, 2.8 * s, 2.8 * s, "D")
+        pdf.ellipse(ix + 4.2 * s, cy + 0.2 * s, 2.8 * s, 2.8 * s, "D")
+        pdf.line(ix + 1.4 * s, cy + 1.6 * s, ix + 4.0 * s, cy - 0.6 * s)
+        pdf.line(ix + 4.0 * s, cy - 0.6 * s, ix + 5.6 * s, cy + 1.6 * s)
+        pdf.line(ix + 4.0 * s, cy - 0.6 * s, ix + 5.2 * s, cy - 0.8 * s)
 
 
 def _summary_card(pdf, x, y, w, h, title, accent, occupied, available, total):
@@ -916,16 +917,16 @@ def _summary_card(pdf, x, y, w, h, title, accent, occupied, available, total):
     except TypeError:
         pdf.rect(x, y, w, h, "FD")
 
-    header_h = 11.5
-    # Centered title + vehicle icon
-    pdf.set_font("Helvetica", "B", 13)
-    text_w = pdf.get_string_width(title)
-    icon_w = 7.5
-    group_w = icon_w + 2.5 + text_w
-    gx = x + (w - group_w) / 2
+    header_h = 9
+    # Combined icon + title, left-aligned in the header (smaller, balanced)
+    s = 0.85
+    title_size = 10.5
+    icon_w = 7 * s
+    gap = 2.0
+    gx = x + 5
     icy = y + header_h / 2
-    _draw_vehicle_icon(pdf, gx, icy, title.strip().lower().startswith("car"), accent)
-    _txt(pdf, gx + icon_w + 2.5, icy - 3.2, text_w + 6, title, size=13, style="B", color=accent, h=6)
+    _draw_vehicle_icon(pdf, gx, icy, title.strip().lower().startswith("car"), accent, s=s)
+    _txt(pdf, gx + icon_w + gap, icy - 2.6, w - (icon_w + gap) - 7, title, size=title_size, style="B", color=accent, h=5)
 
     # Divider under header
     pdf.set_draw_color(*_tint(accent, 0.5))
@@ -942,9 +943,10 @@ def _summary_card(pdf, x, y, w, h, title, accent, occupied, available, total):
         cx = x + i * col_w
         if i > 0:
             pdf.set_draw_color(*_tint(accent, 0.5))
-            pdf.line(cx, sy + 2.5, cx, y + h - 2.5)
-        _txt(pdf, cx, sy + sh * 0.22, col_w, lbl, size=6.5, style="B", color=SLATE_500, align="C", h=4)
-        _txt(pdf, cx, sy + sh * 0.5, col_w, str(val), size=15, style="B", color=c, align="C", h=8)
+            pdf.line(cx, sy + 3, cx, y + h - 3)
+        # Vertically center the label+value pair within the stats area
+        _txt(pdf, cx, sy + sh * 0.26, col_w, lbl, size=6.5, style="B", color=SLATE_500, align="C", h=4)
+        _txt(pdf, cx, sy + sh * 0.56, col_w, str(val), size=14, style="B", color=c, align="C", h=7)
 
 
 def _count_table(pdf, x, y, w, h, title, accent, occupied, available, total):
@@ -1079,10 +1081,14 @@ def generate_parking_history_pdf(items: list, title: str = "AI Parking History R
         _txt(pdf, M, 20, W, f"Total Records: {len(items)}", size=9, color=SLATE_500)
         y = 27
 
+        # Two records per page: keep each card height ≤ ~124mm.
+        header_h = 13
+        counts_h = 28
+        gap = 4
+        img_h = 74
+        card_h = header_h + counts_h + gap + img_h + 3   # = 122
+
         for it in items:
-            img_h = 70
-            counts_h = 26
-            card_h = 10 + 7 + counts_h + 4 + img_h + 6   # ~123mm → two per page
             if y + card_h > pdf.h - 14:
                 pdf.add_page()
                 y = 22
@@ -1092,44 +1098,34 @@ def generate_parking_history_pdf(items: list, title: str = "AI Parking History R
             pdf.set_line_width(0.2)
             pdf.rect(M, y, W, card_h, "FD")
 
-            # Header strip: #idx + location (left), date & time (right)
+            # Header strip: location + camera (stacked, left), date & time (right)
             pdf.set_fill_color(*TEAL_50)
-            pdf.rect(M, y, W, 10, "F")
+            pdf.rect(M, y, W, header_h, "F")
             pdf.set_fill_color(*TEAL)
-            pdf.rect(M, y, 1.6, 10, "F")
-            _txt(pdf, M + 5, y + 2.9, W * 0.6, it.get("location") or "-", size=10, style="B", color=SLATE_900)
-            _txt(pdf, M + 4, y + 2.9, W - 8, it.get("datetime") or "-", size=8.5, style="B", color=SLATE_500, align="R")
+            pdf.rect(M, y, 1.6, header_h, "F")
+            _txt(pdf, M + 5, y + 1.8, W * 0.62, it.get("location") or "-", size=10, style="B", color=SLATE_900)
+            _txt(pdf, M + 5, y + 7.2, W * 0.62, f"Camera: {it.get('camera') or '-'}", size=7.5, style="B", color=SLATE_500)
+            _txt(pdf, M + 4, y + 4.2, W - 8, it.get("datetime") or "-", size=8.5, style="B", color=SLATE_500, align="R")
 
-            # Camera sub-line
-            _txt(pdf, M + 4, y + 11.2, W - 8, f"Camera:  {it.get('camera') or '-'}", size=8, style="B", color=SLATE_500)
-
-            # Detection detail cards (Cars / Two-Wheeler) — inset from the card border
-            cy = y + 17
+            # Detection detail cards (Cars / Two-Wheeler)
+            cy = y + header_h
             ipad = 4
             cgap = 6
             cw = (W - 2 * ipad - cgap) / 2
             car, tw = it["car"], it["tw"]
-            _summary_card(pdf, M + ipad, cy, cw, counts_h, "Cars", BLUE, car["o"], car["a"], car["t"])
-            _summary_card(pdf, M + ipad + cw + cgap, cy, cw, counts_h, "Two Wheeler", INDIGO, tw["o"], tw["a"], tw["t"])
+            _summary_card(pdf, M + ipad, cy + 1, cw, counts_h, "Cars", BLUE, car["o"], car["a"], car["t"])
+            _summary_card(pdf, M + ipad + cw + cgap, cy + 1, cw, counts_h, "Two Wheeler", INDIGO, tw["o"], tw["a"], tw["t"])
 
-            # Full-width image below
-            iy = cy + counts_h + 4
-            ix, iw = M + 4, W - 8
+            # Full-width image (fills the card width)
+            iy = cy + counts_h + gap
+            ix, iw = M + 3, W - 6
             img = _download_image(it.get("image_url"))
-            drawn = False
             if img:
                 try:
-                    pdf.image(img, x=ix, y=iy, w=iw, h=img_h, keep_aspect_ratio=True)
-                    drawn = True
-                except TypeError:
-                    try:
-                        pdf.image(img, ix, iy, iw, img_h)
-                        drawn = True
-                    except Exception:
-                        drawn = False
+                    pdf.image(img, ix, iy, iw, img_h)   # fill width × height
                 except Exception:
-                    drawn = False
-            if not drawn:
+                    pdf._draw_image_placeholder(ix, iy, iw, img_h)
+            else:
                 pdf._draw_image_placeholder(ix, iy, iw, img_h)
 
             y += card_h + 6
