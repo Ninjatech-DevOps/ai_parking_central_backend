@@ -1080,9 +1080,9 @@ def generate_parking_history_pdf(items: list, title: str = "AI Parking History R
         y = 27
 
         for it in items:
-            img_h = 104
-            counts_h = 30
-            card_h = 10 + 7 + counts_h + 4 + img_h + 6
+            img_h = 70
+            counts_h = 26
+            card_h = 10 + 7 + counts_h + 4 + img_h + 6   # ~123mm → two per page
             if y + card_h > pdf.h - 14:
                 pdf.add_page()
                 y = 22

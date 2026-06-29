@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Set
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -220,7 +221,6 @@ async def export_scans_pdf(
     records = []
     for s in items:
         records.append({
-<<<<<<< Updated upstream
             # Combined Date & Time
             "datetime": f"{_fmt_date(s.recorded_at)}, {_fmt_time(s.recorded_at)}",
             "location": s.location.name if s.location else "-",
@@ -229,26 +229,11 @@ async def export_scans_pdf(
             "image_url": _clean_frame_url(s.image_url),
             "car": {"o": s.car_occupied, "a": s.car_available, "t": s.car_total},
             "tw": {"o": s.two_wheeler_occupied, "a": s.two_wheeler_available, "t": s.two_wheeler_total},
-=======
-            # Use the clean frame (slot polylines only) — not the debug frame
-            # which also overlays vehicle-detection boxes on cars.
-            "image_url": s.image_url or "",
-            "fields": [
-                ("Date", _fmt_date(s.recorded_at)),
-                ("Time", _fmt_time(s.recorded_at)),
-                ("Location", s.location.name if s.location else "-"),
-                ("Camera", s.camera.position_label if s.camera else "-"),
-                ("Car Occupied", str(s.car_occupied)),
-                ("Car Available", str(s.car_available)),
-                ("Car Total", str(s.car_total)),
-                ("2-Wheeler Occupied", str(s.two_wheeler_occupied)),
-                ("2-Wheeler Available", str(s.two_wheeler_available)),
-                ("2-Wheeler Total", str(s.two_wheeler_total)),
-            ],
->>>>>>> Stashed changes
         })
 
-    output = generate_parking_history_pdf(records, "AI Parking History Report")
+    # Run PDF generation (which downloads images, blocking) off the event loop
+    # so the single-worker server stays responsive (login, etc.) during export.
+    output = await run_in_threadpool(generate_parking_history_pdf, records, "AI Parking History Report")
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return StreamingResponse(
         output,
