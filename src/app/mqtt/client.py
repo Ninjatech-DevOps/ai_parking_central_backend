@@ -42,6 +42,7 @@ def on_connect(client, userdata, flags, reason_code, properties):
             (MQTTTopics.ALL_ANPR_RECORDS, settings.MQTT_QOS),
             (MQTTTopics.ALL_ANPR_SYNC, settings.MQTT_QOS),
             (MQTTTopics.ALL_ANPR_STATUS, settings.MQTT_QOS),
+            (MQTTTopics.ALL_ANPR_SNAPSHOTS, settings.MQTT_QOS),
         ])
     else:
         logger.error("MQTT connect failed: %s", reason_code)
@@ -78,13 +79,15 @@ def on_message(client, userdata, msg):
             logger.warning("No device_id in message on %s", topic)
             return
 
-        # ANPR topics: anpr/{device_id}/record, anpr/{device_id}/sync/config, anpr/{device_id}/status
+        # ANPR topics: anpr/{device_id}/record, anpr/{device_id}/sync/config, anpr/{device_id}/status, anpr/{device_id}/snapshot
         if topic.startswith("anpr/"):
             suffix = _topic_suffix(topic)
             if "/sync/" in topic:
                 handler_name = "_handle_anpr_sync"
             elif suffix == "status":
                 handler_name = "_handle_device_status"
+            elif suffix == "snapshot":
+                handler_name = "_handle_anpr_snapshot"
             else:
                 handler_name = "_handle_anpr_record"
         # Multi-level suffix topics: parking/{id}/sync/camera, parking/{id}/cmd/result
@@ -269,6 +272,41 @@ def _handle_anpr_sync(device_id: str, payload: dict):
 
     process_anpr_config_sync.delay(device_id, payload)
     logger.info("Dispatched ANPR config sync from %s", device_id)
+
+
+def _handle_anpr_snapshot(device_id: str, payload: dict):
+    """Handle ANPR snapshot response — download from MinIO URL and save to disk."""
+    import os
+    import urllib.request
+
+    camera_id = payload.get("camera_id", "unknown")
+    image_url = payload.get("image_url")
+    width = payload.get("width")
+    height = payload.get("height")
+    error = payload.get("error")
+
+    if error:
+        logger.error("ANPR snapshot error from %s camera %s: %s", device_id, camera_id, error)
+        return
+
+    if not image_url:
+        logger.warning("ANPR snapshot from %s has no image_url", device_id)
+        return
+
+    # Download from MinIO and save locally so GET /cameras/{id}/snapshot works
+    os.makedirs("data/snapshots", exist_ok=True)
+    path = f"data/snapshots/{device_id}_{camera_id}.jpg"
+
+    try:
+        urllib.request.urlretrieve(image_url, path)
+        logger.info("ANPR snapshot saved: %s (%sx%s) from %s", path, width, height, image_url)
+    except Exception:
+        logger.exception("Failed to download ANPR snapshot from %s", image_url)
+        return
+
+    # Update camera record with snapshot_path
+    from src.app.tasks.sync_camera import update_camera_snapshot_by_id
+    update_camera_snapshot_by_id.delay(camera_id, path, width, height)
 
 
 def get_mqtt_client() -> mqtt.Client:

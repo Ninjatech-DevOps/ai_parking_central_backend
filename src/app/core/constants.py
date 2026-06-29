@@ -172,6 +172,7 @@ class MQTTTopics:
     ANPR_RECORD = "anpr/{device_id}/record"
     ANPR_SYNC_CONFIG = "anpr/{device_id}/sync/config"
     ANPR_CMD_CONFIG = "anpr/{device_id}/cmd/config"
+    ANPR_CMD_SNAPSHOT = "anpr/{device_id}/cmd/snapshot"
     ANPR_ACK = "anpr/{device_id}/ack"
 
     # Parking scan (history row from client)
@@ -193,6 +194,7 @@ class MQTTTopics:
     ALL_ANPR_RECORDS = "anpr/+/record"
     ALL_ANPR_SYNC = "anpr/+/sync/#"
     ALL_ANPR_STATUS = "anpr/+/status"
+    ALL_ANPR_SNAPSHOTS = "anpr/+/snapshot"
 
 
 # Permissions

@@ -211,8 +211,6 @@ async def capture_camera_snapshot(
 ):
     """Send snapshot command to edge device for this camera."""
     await _verify_camera_scope(camera_id, user_location_ids, db)
-    from src.app.mqtt.client import publish_command
-    from src.app.core.constants import MQTTTopics
 
     camera = await service.get(camera_id)
     device = await DeviceRepository(db).get_by_id(camera.device_id)
@@ -220,11 +218,20 @@ async def capture_camera_snapshot(
         from src.app.exceptions.base import NotFoundException
         raise NotFoundException(detail="Device not found")
 
-    publish_command(device.device_id, MQTTTopics.CMD_SNAPSHOT, {
-        "command_id": str(uuid.uuid4()),
-        "action": "SNAPSHOT",
-        "payload": {"camera_label": camera.position_label},
-    })
+    if camera.module_type == CameraModuleType.ANPR:
+        # ANPR client expects: {"camera_id": "<central_uuid>"}
+        publish_command(device.device_id, MQTTTopics.ANPR_CMD_SNAPSHOT, {
+            "camera_id": str(camera.id),
+        })
+        logger.info("ANPR snapshot cmd sent to %s for camera %s", device.device_id, camera.id)
+    else:
+        # AI Parking client expects: {"payload": {"camera_label": "..."}}
+        publish_command(device.device_id, MQTTTopics.CMD_SNAPSHOT, {
+            "command_id": str(uuid.uuid4()),
+            "action": "SNAPSHOT",
+            "payload": {"camera_label": camera.position_label},
+        })
+        logger.info("AI Parking snapshot cmd sent to %s for camera %s", device.device_id, camera.position_label)
     return MessageResponse(message="Snapshot command sent")
 
 
