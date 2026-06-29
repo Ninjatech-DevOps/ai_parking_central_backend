@@ -56,3 +56,30 @@ async def _update_snapshot(device_id_str: str, camera_label: str, path: str, wid
 @celery_app.task(name="tasks.update_camera_snapshot")
 def update_camera_snapshot(device_id: str, camera_label: str, path: str, width: int, height: int):
     asyncio.run(_update_snapshot(device_id, camera_label, path, width, height))
+
+
+async def _update_snapshot_by_id(camera_id_str: str, path: str, width: int, height: int):
+    import uuid
+    async with get_celery_session_factory()() as db:
+        camera_repo = CameraRepository(db)
+        try:
+            cam_id = uuid.UUID(camera_id_str)
+        except (ValueError, TypeError):
+            logger.warning("Invalid camera_id for snapshot update: %s", camera_id_str)
+            return
+        camera = await camera_repo.get_by_id(cam_id)
+        if not camera:
+            logger.warning("Camera %s not found for snapshot update", camera_id_str)
+            return
+        await camera_repo.update(camera.id, {
+            "frame_width": width,
+            "frame_height": height,
+            "snapshot_path": path,
+        })
+        await db.commit()
+        logger.info("ANPR camera %s snapshot updated: %s (%sx%s)", camera_id_str, path, width, height)
+
+
+@celery_app.task(name="tasks.update_camera_snapshot_by_id")
+def update_camera_snapshot_by_id(camera_id: str, path: str, width: int, height: int):
+    asyncio.run(_update_snapshot_by_id(camera_id, path, width, height))

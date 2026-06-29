@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 from typing import List, Optional, Set
@@ -7,8 +8,9 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.api.deps import PermissionChecker, get_user_location_ids, verify_location_in_scope
-from src.app.core.constants import Permission
+from src.app.core.constants import CameraModuleType, MQTTTopics, Permission
 from src.app.db.session import get_db
+from src.app.mqtt.client import publish_command
 from src.app.repositories.camera import CameraRepository
 from src.app.repositories.parking_slot import ParkingSlotRepository
 from src.app.schemas.base import MessageResponse, PaginatedResponse
@@ -19,6 +21,8 @@ from src.app.services.camera import CameraService
 from src.app.services.device_config_push import push_camera_config, push_calibrate
 from src.app.repositories.device import DeviceRepository
 from src.app.utils.pagination import build_paginated_response, get_pagination_params
+
+logger = logging.getLogger("ai_parking.routes.camera")
 
 router = APIRouter(prefix="/cameras", tags=["Cameras"])
 
@@ -52,14 +56,28 @@ async def create_camera(
     db: AsyncSession = Depends(get_db),
 ):
     camera = await service.create(body.model_dump())
-    # Push to edge device
+    # Push to edge device via MQTT
     device = await DeviceRepository(db).get_by_id(camera.device_id)
     if device:
-        push_camera_config(device.device_id, "create", {
-            "label": camera.position_label,
-            "source": camera.source or "0",
-            "camera_type": camera.camera_type.value if hasattr(camera.camera_type, "value") else str(camera.camera_type or "USB"),
-        })
+        if camera.module_type == CameraModuleType.ANPR:
+            payload = {
+                "action": "CREATE",
+                "camera_id": str(camera.id),
+                "name": camera.position_label,
+                "stream_url": camera.source or "",
+                "direction": "IN",
+                "is_active": True,
+            }
+            topic = MQTTTopics.ANPR_CMD_CONFIG.format(device_id=device.device_id)
+            publish_command(device.device_id, MQTTTopics.ANPR_CMD_CONFIG, payload)
+            logger.info("ANPR camera CREATE published to %s: camera_id=%s name=%s", topic, camera.id, camera.position_label)
+        else:
+            push_camera_config(device.device_id, "create", {
+                "label": camera.position_label,
+                "source": camera.source or "0",
+                "camera_type": camera.camera_type.value if hasattr(camera.camera_type, "value") else str(camera.camera_type or "USB"),
+            })
+            logger.info("AI Parking camera CREATE pushed to %s: label=%s", device.device_id, camera.position_label)
     return camera
 
 
@@ -101,7 +119,20 @@ async def update_camera(
     user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
 ):
     await _verify_camera_scope(camera_id, user_location_ids, db)
-    return await service.update(camera_id, body.model_dump(exclude_unset=True))
+    camera = await service.update(camera_id, body.model_dump(exclude_unset=True))
+    # Push update to edge device
+    device = await DeviceRepository(db).get_by_id(camera.device_id)
+    if device and camera.module_type == CameraModuleType.ANPR:
+        payload = {
+            "action": "UPDATE",
+            "camera_id": str(camera.id),
+            "name": camera.position_label,
+            "stream_url": camera.source or "",
+            "is_active": camera.is_active,
+        }
+        publish_command(device.device_id, MQTTTopics.ANPR_CMD_CONFIG, payload)
+        logger.info("ANPR camera UPDATE published to %s: camera_id=%s", device.device_id, camera.id)
+    return camera
 
 
 @router.delete("/{camera_id}", response_model=MessageResponse)
@@ -117,7 +148,16 @@ async def delete_camera(
     device = await DeviceRepository(db).get_by_id(camera.device_id)
     await service.delete(camera_id)
     if device:
-        push_camera_config(device.device_id, "delete", {"label": camera.position_label})
+        if camera.module_type == CameraModuleType.ANPR:
+            payload = {
+                "action": "DELETE",
+                "camera_id": str(camera.id),
+            }
+            publish_command(device.device_id, MQTTTopics.ANPR_CMD_CONFIG, payload)
+            logger.info("ANPR camera DELETE published to %s: camera_id=%s", device.device_id, camera.id)
+        else:
+            push_camera_config(device.device_id, "delete", {"label": camera.position_label})
+            logger.info("AI Parking camera DELETE pushed to %s: label=%s", device.device_id, camera.position_label)
     return MessageResponse(message="Camera deleted successfully")
 
 
@@ -171,8 +211,6 @@ async def capture_camera_snapshot(
 ):
     """Send snapshot command to edge device for this camera."""
     await _verify_camera_scope(camera_id, user_location_ids, db)
-    from src.app.mqtt.client import publish_command
-    from src.app.core.constants import MQTTTopics
 
     camera = await service.get(camera_id)
     device = await DeviceRepository(db).get_by_id(camera.device_id)
@@ -180,11 +218,20 @@ async def capture_camera_snapshot(
         from src.app.exceptions.base import NotFoundException
         raise NotFoundException(detail="Device not found")
 
-    publish_command(device.device_id, MQTTTopics.CMD_SNAPSHOT, {
-        "command_id": str(uuid.uuid4()),
-        "action": "SNAPSHOT",
-        "payload": {"camera_label": camera.position_label},
-    })
+    if camera.module_type == CameraModuleType.ANPR:
+        # ANPR client expects: {"camera_id": "<central_uuid>"}
+        publish_command(device.device_id, MQTTTopics.ANPR_CMD_SNAPSHOT, {
+            "camera_id": str(camera.id),
+        })
+        logger.info("ANPR snapshot cmd sent to %s for camera %s", device.device_id, camera.id)
+    else:
+        # AI Parking client expects: {"payload": {"camera_label": "..."}}
+        publish_command(device.device_id, MQTTTopics.CMD_SNAPSHOT, {
+            "command_id": str(uuid.uuid4()),
+            "action": "SNAPSHOT",
+            "payload": {"camera_label": camera.position_label},
+        })
+        logger.info("AI Parking snapshot cmd sent to %s for camera %s", device.device_id, camera.position_label)
     return MessageResponse(message="Snapshot command sent")
 
 

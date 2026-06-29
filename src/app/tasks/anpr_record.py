@@ -132,10 +132,36 @@ async def _process(device_id_str: str, payload: dict):
             await db.commit()
             logger.info("ANPR record processed: %s %s %s", number_plate, direction, device_id_str)
 
+            # Publish ACK so the edge device can map its local_id → central record id
+            local_id = payload.get("local_id")
+            if local_id is not None:
+                _publish_ack(device_id_str, local_id, str(record.id))
+
         except Exception:
             await db.rollback()
             logger.exception("Failed to process ANPR record from %s", device_id_str)
             raise
+
+
+def _publish_ack(device_id_str: str, local_id: int, central_id: str) -> None:
+    """Publish ACK back to edge device so it can store the central_detection_id."""
+    try:
+        from src.app.core.constants import MQTTTopics
+        from src.app.mqtt.client import get_mqtt_client
+
+        topic = MQTTTopics.ANPR_ACK.format(device_id=device_id_str)
+        client = get_mqtt_client()
+        if client:
+            import json
+            payload = json.dumps({
+                "type": "detection_ack",
+                "local_id": local_id,
+                "central_id": central_id,
+            })
+            client.publish(topic, payload, qos=1)
+            logger.info("ANPR ACK sent to %s: local_id=%s → central_id=%s", device_id_str, local_id, central_id)
+    except Exception:
+        logger.exception("Failed to publish ANPR ACK to %s", device_id_str)
 
 
 @celery_app.task(name="tasks.process_anpr_record", bind=True, max_retries=3)
