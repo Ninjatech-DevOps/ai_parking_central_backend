@@ -30,7 +30,7 @@ pipeline {
                     def imageName = "ai_parking_api:${BUILD_NUMBER}"
                     sh """
                         ssh -o StrictHostKeyChecking=no ${sshUser}@${serverIP} /bin/sh << EOF
-                        cd /home/root/ai_parking_central_backend
+                        cd /root/ai_parking_central_backend
                         git status
                         git stash
                         git pull
@@ -50,7 +50,7 @@ EOF
                     def imageName = "ai_parking_api:${BUILD_NUMBER}"
                     sh """
                         ssh -o StrictHostKeyChecking=no ${sshUser}@${serverIP} /bin/sh << EOF
-                        cd /home/root/ai_parking_central_backend
+                        cd /root/ai_parking_central_backend
                         docker compose up -d --build
 EOF
                     """
