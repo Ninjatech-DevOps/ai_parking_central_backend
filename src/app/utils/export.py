@@ -1078,28 +1078,28 @@ def generate_public_view_pdf(view: dict) -> io.BytesIO:
 
 
 def generate_parking_history_pdf(items: list, title: str = "AI Parking History Report") -> io.BytesIO:
-    """Portrait card matching the public share URL view:
-    header strip (location + datetime), image left ~64%, count tables right.
+    """Landscape layout matching public share view:
+    header strip (location + datetime), image left ~78%, count tables right ~22%.
 
     Each item: {datetime, location, camera, image_url, car:{o,a,t}, tw:{o,a,t}}.
     """
     try:
-        pdf = ParkingPDF(title, orientation="P")
+        pdf = ParkingPDF(title, orientation="L")
         pdf.alias_nb_pages()
         pdf.set_auto_page_break(False)
         M = 10
         W = pdf.w - 2 * M
         pdf.add_page()
-        _txt(pdf, M, 20, W, f"Total Records: {len(items)}", size=9, color=SLATE_500)
-        y = 27
+        _txt(pdf, M, 16, W, f"Total Records: {len(items)}", size=9, color=SLATE_500)
+        y = 22
 
         for it in items:
-            content_h = 86
+            content_h = 72
             header_h = 9.5
-            card_h = header_h + content_h + 5
-            if y + card_h > pdf.h - 14:
+            card_h = header_h + content_h + 4
+            if y + card_h > pdf.h - 12:
                 pdf.add_page()
-                y = 22
+                y = 18
 
             # Card border
             pdf.set_fill_color(*WHITE)
@@ -1115,10 +1115,12 @@ def generate_parking_history_pdf(items: list, title: str = "AI Parking History R
             _txt(pdf, M + 5, y + 2.4, W * 0.6, it.get("location") or "-", size=10, style="B", color=SLATE_900)
             _txt(pdf, M + 4, y + 2.4, W - 8, it.get("datetime") or "-", size=8.5, style="B", color=SLATE_500, align="R")
 
-            # Content row: image (left ~80%) + count tables (right ~20%)
+            # Content: image left ~78%, count tables right ~22%
             cy = y + header_h + 2
-            ix = M + 4
+            ix = M + 3
             iw = W * 0.78
+            rx = ix + iw + 4
+            rw = (M + W) - rx - 3
 
             # Image
             drawn = False
@@ -1138,16 +1140,14 @@ def generate_parking_history_pdf(items: list, title: str = "AI Parking History R
             if not drawn:
                 pdf._draw_image_placeholder(ix, cy, iw, content_h)
 
-            # Right: two stacked count tables (same as public share view)
-            rx = ix + iw + 5
-            rw = (M + W) - rx - 4
-            t_gap = 4
+            # Right: two stacked count tables
+            t_gap = 3
             t_h = (content_h - t_gap) / 2
             car, tw = it["car"], it["tw"]
             _count_table(pdf, rx, cy, rw, t_h, "Cars", BLUE, car["o"], car["a"], car["t"])
             _count_table(pdf, rx, cy + t_h + t_gap, rw, t_h, "Two Wheeler", INDIGO, tw["o"], tw["a"], tw["t"])
 
-            y += card_h + 6
+            y += card_h + 4
 
         output = io.BytesIO()
         pdf.output(output)
