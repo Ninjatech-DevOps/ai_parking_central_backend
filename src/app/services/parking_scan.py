@@ -21,9 +21,10 @@ class ParkingScanService:
         location_ids: Optional[Set[uuid.UUID]] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
+        interval_minutes: Optional[int] = None,
     ) -> List[ParkingScan]:
         return await self.repo.get_filtered(
-            skip, limit, location_id, location_ids, start_date, end_date
+            skip, limit, location_id, location_ids, start_date, end_date, interval_minutes
         )
 
     async def count_filtered(
@@ -32,7 +33,11 @@ class ParkingScanService:
         location_ids: Optional[Set[uuid.UUID]] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
+        interval_minutes: Optional[int] = None,
     ) -> int:
         return await self.repo.count_filtered(
-            location_id, location_ids, start_date, end_date
+            location_id, location_ids, start_date, end_date, interval_minutes
         )
+
+    async def update_scan(self, scan_id: uuid.UUID, data: Dict[str, Any]) -> ParkingScan:
+        return await self.repo.update(scan_id, data)

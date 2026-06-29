@@ -25,3 +25,13 @@ class ParkingScanResponse(BaseSchema):
     device_name: Optional[str] = None
 
     model_config = {"from_attributes": True}
+
+
+class ParkingScanUpdate(BaseSchema):
+    """Inline-edit fields — all optional, only send what changed."""
+    car_occupied: Optional[int] = None
+    car_available: Optional[int] = None
+    car_total: Optional[int] = None
+    two_wheeler_occupied: Optional[int] = None
+    two_wheeler_available: Optional[int] = None
+    two_wheeler_total: Optional[int] = None

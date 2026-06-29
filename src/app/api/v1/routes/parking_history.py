@@ -16,7 +16,7 @@ from src.app.core.constants import Permission
 from src.app.db.session import get_db
 from src.app.models.location import Location as LocationModel
 from src.app.repositories.parking_scan import ParkingScanRepository
-from src.app.schemas.parking_scan import ParkingScanResponse
+from src.app.schemas.parking_scan import ParkingScanResponse, ParkingScanUpdate
 from src.app.schemas.base import PaginatedResponse
 from src.app.services.parking_scan import ParkingScanService
 from src.app.utils.export import generate_excel, generate_pdf_with_images
@@ -60,6 +60,7 @@ async def list_scans(
     location_id: Optional[uuid.UUID] = Query(None),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
+    interval_minutes: Optional[int] = Query(None, ge=0, le=60, description="Sample interval in minutes (0=all rows, 5=one per 5min)"),
     service: ParkingScanService = Depends(_get_service),
     _: bool = Depends(PermissionChecker(Permission.REPORTS_VIEW)),
     user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
@@ -78,12 +79,13 @@ async def list_scans(
     skip, limit = get_pagination_params(page, page_size)
     start = _parse_date(start_date)
     end = _parse_date(end_date)
+    iv = interval_minutes if interval_minutes and interval_minutes > 0 else None
 
     items = await service.get_filtered(
-        skip, limit, location_id, scoped_ids, start, end
+        skip, limit, location_id, scoped_ids, start, end, iv
     )
     total = await service.count_filtered(
-        location_id, scoped_ids, start, end
+        location_id, scoped_ids, start, end, iv
     )
 
     response_items = []
@@ -114,6 +116,7 @@ async def export_scans_csv(
     location_id: Optional[uuid.UUID] = Query(None),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
+    interval_minutes: Optional[int] = Query(None, ge=0, le=60),
     service: ParkingScanService = Depends(_get_service),
     _: bool = Depends(PermissionChecker(Permission.REPORTS_EXPORT)),
     user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
@@ -122,8 +125,9 @@ async def export_scans_csv(
     scoped_ids = await _resolve_scope(area_id, user_location_ids, db)
     start = _parse_date(start_date)
     end = _parse_date(end_date)
+    iv = interval_minutes if interval_minutes and interval_minutes > 0 else None
     items = await service.get_filtered(
-        0, 50000, location_id, scoped_ids, start, end
+        0, 50000, location_id, scoped_ids, start, end, iv
     )
 
     output = io.StringIO()
@@ -157,6 +161,7 @@ async def export_scans_excel(
     location_id: Optional[uuid.UUID] = Query(None),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
+    interval_minutes: Optional[int] = Query(None, ge=0, le=60),
     service: ParkingScanService = Depends(_get_service),
     _: bool = Depends(PermissionChecker(Permission.REPORTS_EXPORT)),
     user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
@@ -165,8 +170,9 @@ async def export_scans_excel(
     scoped_ids = await _resolve_scope(area_id, user_location_ids, db)
     start = _parse_date(start_date)
     end = _parse_date(end_date)
+    iv = interval_minutes if interval_minutes and interval_minutes > 0 else None
     items = await service.get_filtered(
-        0, 50000, location_id, scoped_ids, start, end
+        0, 50000, location_id, scoped_ids, start, end, iv
     )
 
     headers = ["Date", "Time", "Car Occupied", "Car Available", "Car Total",
@@ -197,6 +203,7 @@ async def export_scans_pdf(
     location_id: Optional[uuid.UUID] = Query(None),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
+    interval_minutes: Optional[int] = Query(None, ge=0, le=60),
     service: ParkingScanService = Depends(_get_service),
     _: bool = Depends(PermissionChecker(Permission.REPORTS_EXPORT)),
     user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
@@ -205,8 +212,9 @@ async def export_scans_pdf(
     scoped_ids = await _resolve_scope(area_id, user_location_ids, db)
     start = _parse_date(start_date)
     end = _parse_date(end_date)
+    iv = interval_minutes if interval_minutes and interval_minutes > 0 else None
     items = await service.get_filtered(
-        0, 5000, location_id, scoped_ids, start, end
+        0, 5000, location_id, scoped_ids, start, end, iv
     )
 
     records = []
@@ -236,3 +244,23 @@ async def export_scans_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=parking_history_{ts}.pdf"},
     )
+
+
+@router.patch("/{scan_id}", response_model=ParkingScanResponse)
+async def update_scan(
+    scan_id: uuid.UUID,
+    body: ParkingScanUpdate,
+    service: ParkingScanService = Depends(_get_service),
+    _: bool = Depends(PermissionChecker(Permission.REPORTS_EXPORT)),
+):
+    """Update parking scan numbers (inline edit from FE)."""
+    data = body.model_dump(exclude_unset=True)
+    scan = await service.update_scan(scan_id, data)
+    resp = ParkingScanResponse.model_validate(scan)
+    if scan.location:
+        resp.location_name = scan.location.name
+    if scan.camera:
+        resp.camera_label = scan.camera.position_label
+    if scan.device:
+        resp.device_name = scan.device.device_id
+    return resp
