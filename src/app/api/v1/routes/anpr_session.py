@@ -15,7 +15,7 @@ from src.app.db.session import get_db
 from src.app.models.location import Location
 from src.app.repositories.anpr_session import AnprSessionRepository
 from src.app.schemas.anpr_session import AnprSessionResponse
-from src.app.schemas.base import PaginatedResponse
+from src.app.schemas.base import MessageResponse, PaginatedResponse
 from src.app.services.anpr_session import AnprSessionService
 from src.app.utils.export import generate_excel, generate_pdf_with_images
 from src.app.utils.pagination import build_paginated_response, get_pagination_params
@@ -221,3 +221,13 @@ async def export_sessions_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=anpr_sessions_{ts}.pdf"},
     )
+
+
+@router.delete("/{session_id}", response_model=MessageResponse)
+async def delete_session(
+    session_id: uuid.UUID,
+    service: AnprSessionService = Depends(_get_service),
+    _: bool = Depends(PermissionChecker(Permission.ANPR_CONFIGURE)),
+):
+    await service.repo.delete(session_id)
+    return MessageResponse(message="Session deleted")

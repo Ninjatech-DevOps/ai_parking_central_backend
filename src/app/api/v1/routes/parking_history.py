@@ -18,7 +18,7 @@ from src.app.db.session import get_db
 from src.app.models.location import Location as LocationModel
 from src.app.repositories.parking_scan import ParkingScanRepository
 from src.app.schemas.parking_scan import ParkingScanResponse, ParkingScanUpdate
-from src.app.schemas.base import PaginatedResponse
+from src.app.schemas.base import MessageResponse, PaginatedResponse
 from src.app.services.parking_scan import ParkingScanService
 from src.app.utils.export import generate_excel, generate_parking_history_pdf
 from src.app.utils.pagination import build_paginated_response, get_pagination_params
@@ -259,3 +259,13 @@ async def update_scan(
     if scan.device:
         resp.device_name = scan.device.device_id
     return resp
+
+
+@router.delete("/{scan_id}", response_model=MessageResponse)
+async def delete_scan(
+    scan_id: uuid.UUID,
+    service: ParkingScanService = Depends(_get_service),
+    _: bool = Depends(PermissionChecker(Permission.REPORTS_EXPORT)),
+):
+    await service.repo.delete(scan_id)
+    return MessageResponse(message="Scan deleted")
