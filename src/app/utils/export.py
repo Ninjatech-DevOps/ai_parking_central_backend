@@ -1067,68 +1067,76 @@ def generate_public_view_pdf(view: dict) -> io.BytesIO:
 
 
 def generate_parking_history_pdf(items: list, title: str = "AI Parking History Report") -> io.BytesIO:
-    """One card per scan: detection details as cards on top, full-width image below.
+    """Landscape card: image left (60%), counts right (40%). 2 records per page.
 
     Each item: {datetime, location, camera, image_url, car:{o,a,t}, tw:{o,a,t}}.
     """
     try:
-        pdf = ParkingPDF(title, orientation="P")
+        pdf = ParkingPDF(title, orientation="L")
         pdf.alias_nb_pages()
         pdf.set_auto_page_break(False)
         M = 10
         W = pdf.w - 2 * M
         pdf.add_page()
-        _txt(pdf, M, 20, W, f"Total Records: {len(items)}", size=9, color=SLATE_500)
-        y = 27
-
-        # Two records per page: keep each card height ≤ ~124mm.
-        header_h = 13
-        counts_h = 28
-        gap = 4
-        img_h = 74
-        card_h = header_h + counts_h + gap + img_h + 3   # = 122
+        _txt(pdf, M, 16, W, f"Total Records: {len(items)}", size=9, color=SLATE_500)
+        y = 22
 
         for it in items:
-            if y + card_h > pdf.h - 14:
+            card_h = 72
+            if y + card_h > pdf.h - 12:
                 pdf.add_page()
-                y = 22
+                y = 18
 
+            # Card border
             pdf.set_fill_color(*WHITE)
             pdf.set_draw_color(*SLATE_300)
             pdf.set_line_width(0.2)
             pdf.rect(M, y, W, card_h, "FD")
 
-            # Header strip: location + camera (stacked, left), date & time (right)
-            pdf.set_fill_color(*TEAL_50)
-            pdf.rect(M, y, W, header_h, "F")
+            # Left accent bar
             pdf.set_fill_color(*TEAL)
-            pdf.rect(M, y, 1.6, header_h, "F")
-            _txt(pdf, M + 5, y + 1.8, W * 0.62, it.get("location") or "-", size=10, style="B", color=SLATE_900)
-            _txt(pdf, M + 5, y + 7.2, W * 0.62, f"Camera: {it.get('camera') or '-'}", size=7.5, style="B", color=SLATE_500)
-            _txt(pdf, M + 4, y + 4.2, W - 8, it.get("datetime") or "-", size=8.5, style="B", color=SLATE_500, align="R")
+            pdf.rect(M, y, 1.6, card_h, "F")
 
-            # Detection detail cards (Cars / Two-Wheeler)
-            cy = y + header_h
-            ipad = 4
-            cgap = 6
-            cw = (W - 2 * ipad - cgap) / 2
-            car, tw = it["car"], it["tw"]
-            _summary_card(pdf, M + ipad, cy + 1, cw, counts_h, "Cars", BLUE, car["o"], car["a"], car["t"])
-            _summary_card(pdf, M + ipad + cw + cgap, cy + 1, cw, counts_h, "Two Wheeler", INDIGO, tw["o"], tw["a"], tw["t"])
+            # ── Left side: Image (58% width) ──
+            img_w = W * 0.58
+            img_pad = 3
+            ix, iy = M + img_pad, y + img_pad
+            iw, ih = img_w - img_pad * 2, card_h - img_pad * 2
 
-            # Full-width image (fills the card width)
-            iy = cy + counts_h + gap
-            ix, iw = M + 3, W - 6
+            drawn = False
             img = _download_image(it.get("image_url"))
             if img:
                 try:
-                    pdf.image(img, ix, iy, iw, img_h)   # fill width × height
+                    pdf.image(img, x=ix, y=iy, w=iw, h=ih, keep_aspect_ratio=True)
+                    drawn = True
+                except TypeError:
+                    try:
+                        pdf.image(img, ix, iy, iw, ih)
+                        drawn = True
+                    except Exception:
+                        drawn = False
                 except Exception:
-                    pdf._draw_image_placeholder(ix, iy, iw, img_h)
-            else:
-                pdf._draw_image_placeholder(ix, iy, iw, img_h)
+                    drawn = False
+            if not drawn:
+                pdf._draw_image_placeholder(ix, iy, iw, ih)
 
-            y += card_h + 6
+            # ── Right side: Info + Counts (40% width) ──
+            rx = M + img_w + 2
+            rw = W - img_w - 4
+
+            # Location name (bold)
+            _txt(pdf, rx, y + 3, rw, it.get("location") or "-", size=10, style="B", color=SLATE_900)
+            # Date & time
+            _txt(pdf, rx, y + 10, rw, it.get("datetime") or "-", size=8, color=SLATE_500)
+
+            # Count cards: Cars + Two Wheeler stacked vertically
+            cy = y + 18
+            ch = 23
+            car, tw = it["car"], it["tw"]
+            _summary_card(pdf, rx, cy, rw, ch, "Cars", BLUE, car["o"], car["a"], car["t"])
+            _summary_card(pdf, rx, cy + ch + 3, rw, ch, "Two Wheeler", INDIGO, tw["o"], tw["a"], tw["t"])
+
+            y += card_h + 4
 
         output = io.BytesIO()
         pdf.output(output)
