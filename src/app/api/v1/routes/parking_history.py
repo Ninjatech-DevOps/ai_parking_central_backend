@@ -43,6 +43,15 @@ def _fmt_time(dt: datetime) -> str:
     return (dt + IST).strftime("%I:%M %p")
 
 
+def _clean_frame_url(url: Optional[str]) -> str:
+    """Prefer the 'clean' frame (slot polylines only) over the debug frame
+    (which also draws vehicle-detection boxes/labels). The edge uploads both:
+    `debug/{device}/{camera}/latest.jpg` (debug) and `.../clean.jpg` (clean)."""
+    if url and url.endswith("/latest.jpg"):
+        return url[: -len("/latest.jpg")] + "/clean.jpg"
+    return url or ""
+
+
 @router.get("", response_model=PaginatedResponse[ParkingScanResponse])
 async def list_scans(
     page: int = Query(1, ge=1),
@@ -203,18 +212,20 @@ async def export_scans_pdf(
     records = []
     for s in items:
         records.append({
-            "image_url": s.image_url or "",
+            # Use the clean frame (slot polylines only) — not the debug frame
+            # which also overlays vehicle-detection boxes on cars.
+            "image_url": _clean_frame_url(s.image_url),
             "fields": [
                 ("Date", _fmt_date(s.recorded_at)),
                 ("Time", _fmt_time(s.recorded_at)),
                 ("Location", s.location.name if s.location else "-"),
                 ("Camera", s.camera.position_label if s.camera else "-"),
-                ("Car Occ", str(s.car_occupied)),
-                ("Car Avail", str(s.car_available)),
+                ("Car Occupied", str(s.car_occupied)),
+                ("Car Available", str(s.car_available)),
                 ("Car Total", str(s.car_total)),
-                ("2W Occ", str(s.two_wheeler_occupied)),
-                ("2W Avail", str(s.two_wheeler_available)),
-                ("2W Total", str(s.two_wheeler_total)),
+                ("2-Wheeler Occupied", str(s.two_wheeler_occupied)),
+                ("2-Wheeler Available", str(s.two_wheeler_available)),
+                ("2-Wheeler Total", str(s.two_wheeler_total)),
             ],
         })
 
