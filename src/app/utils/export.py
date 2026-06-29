@@ -971,12 +971,8 @@ def _count_table(pdf, x, y, w, h, title, accent, occupied, available, total):
     _draw_vehicle_icon(pdf, gx, icy, is_car, accent, s=s)
     _txt(pdf, gx + icon_w + gap, icy - 2.5, text_w + 4, title, size=9, style="B", color=accent, h=5)
 
-    hy = y + 11.5
-    _txt(pdf, x + 5, hy, w * 0.5, "STATUS", size=6, style="B", color=SLATE_400)
-    _txt(pdf, x, hy, w - 5, "COUNT", size=6, style="B", color=SLATE_400, align="R")
-
-    ry = hy + 5
-    row_h = (y + h - ry - 2) / 3
+    ry = y + 12
+    row_h = (y + h - ry - 1) / 3
     for i, (lbl, val, c) in enumerate([
         ("Occupied", occupied, RED), ("Available", available, EMERALD), ("Total", total, accent),
     ]):
@@ -984,9 +980,9 @@ def _count_table(pdf, x, y, w, h, title, accent, occupied, available, total):
         if i > 0:
             pdf.set_draw_color(*SLATE_100)
             pdf.set_line_width(0.2)
-            pdf.line(x + 4, cy, x + w - 4, cy)
-        _txt(pdf, x + 5, cy + row_h / 2 - 2.3, w * 0.6, lbl, size=8.5, color=SLATE_700, h=4)
-        _txt(pdf, x, cy + row_h / 2 - 2.7, w - 5, str(val), size=12, style="B", color=c, align="R", h=5)
+            pdf.line(x + 3, cy, x + w - 3, cy)
+        _txt(pdf, x + 3, cy + row_h / 2 - 2.5, w * 0.55, lbl, size=8, color=SLATE_700, h=5)
+        _txt(pdf, x, cy + row_h / 2 - 3, w - 3, str(val), size=14, style="B", color=c, align="R", h=6)
 
 
 def generate_public_view_pdf(view: dict) -> io.BytesIO:
@@ -1078,28 +1074,28 @@ def generate_public_view_pdf(view: dict) -> io.BytesIO:
 
 
 def generate_parking_history_pdf(items: list, title: str = "AI Parking History Report") -> io.BytesIO:
-    """Landscape layout matching public share view:
-    header strip (location + datetime), image left ~78%, count tables right ~22%.
+    """Portrait layout matching public share view:
+    header strip (location + datetime), image left ~78%, count tables right.
 
     Each item: {datetime, location, camera, image_url, car:{o,a,t}, tw:{o,a,t}}.
     """
     try:
-        pdf = ParkingPDF(title, orientation="L")
+        pdf = ParkingPDF(title, orientation="P")
         pdf.alias_nb_pages()
         pdf.set_auto_page_break(False)
         M = 10
         W = pdf.w - 2 * M
         pdf.add_page()
-        _txt(pdf, M, 16, W, f"Total Records: {len(items)}", size=9, color=SLATE_500)
-        y = 22
+        _txt(pdf, M, 20, W, f"Total Records: {len(items)}", size=9, color=SLATE_500)
+        y = 27
 
         for it in items:
-            content_h = 72
+            content_h = 86
             header_h = 9.5
-            card_h = header_h + content_h + 4
-            if y + card_h > pdf.h - 12:
+            card_h = header_h + content_h + 5
+            if y + card_h > pdf.h - 14:
                 pdf.add_page()
-                y = 18
+                y = 22
 
             # Card border
             pdf.set_fill_color(*WHITE)
@@ -1115,12 +1111,12 @@ def generate_parking_history_pdf(items: list, title: str = "AI Parking History R
             _txt(pdf, M + 5, y + 2.4, W * 0.6, it.get("location") or "-", size=10, style="B", color=SLATE_900)
             _txt(pdf, M + 4, y + 2.4, W - 8, it.get("datetime") or "-", size=8.5, style="B", color=SLATE_500, align="R")
 
-            # Content: image left ~78%, count tables right ~22%
+            # Content: image left ~78%, count tables right
             cy = y + header_h + 2
-            ix = M + 3
+            ix = M + 4
             iw = W * 0.78
-            rx = ix + iw + 4
-            rw = (M + W) - rx - 3
+            rx = ix + iw + 5
+            rw = (M + W) - rx - 4
 
             # Image
             drawn = False
@@ -1141,13 +1137,13 @@ def generate_parking_history_pdf(items: list, title: str = "AI Parking History R
                 pdf._draw_image_placeholder(ix, cy, iw, content_h)
 
             # Right: two stacked count tables
-            t_gap = 3
+            t_gap = 4
             t_h = (content_h - t_gap) / 2
             car, tw = it["car"], it["tw"]
             _count_table(pdf, rx, cy, rw, t_h, "Cars", BLUE, car["o"], car["a"], car["t"])
             _count_table(pdf, rx, cy + t_h + t_gap, rw, t_h, "Two Wheeler", INDIGO, tw["o"], tw["a"], tw["t"])
 
-            y += card_h + 4
+            y += card_h + 6
 
         output = io.BytesIO()
         pdf.output(output)
