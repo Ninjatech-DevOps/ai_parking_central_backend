@@ -225,8 +225,7 @@ async def export_scans_pdf(
             "datetime": f"{_fmt_date(s.recorded_at)}, {_fmt_time(s.recorded_at)}",
             "location": s.location.name if s.location else "-",
             "camera": s.camera.position_label if s.camera else "-",
-            # Clean frame (slot polylines only) — not the debug frame with car boxes.
-            "image_url": _clean_frame_url(s.image_url),
+            "image_url": s.image_url or "",
             "car": {"o": s.car_occupied, "a": s.car_available, "t": s.car_total},
             "tw": {"o": s.two_wheeler_occupied, "a": s.two_wheeler_available, "t": s.two_wheeler_total},
         })
