@@ -41,6 +41,7 @@ def on_connect(client, userdata, flags, reason_code, properties):
             # ANPR topics
             (MQTTTopics.ALL_ANPR_RECORDS, settings.MQTT_QOS),
             (MQTTTopics.ALL_ANPR_SYNC, settings.MQTT_QOS),
+            (MQTTTopics.ALL_ANPR_STATUS, settings.MQTT_QOS),
         ])
     else:
         logger.error("MQTT connect failed: %s", reason_code)
@@ -77,10 +78,13 @@ def on_message(client, userdata, msg):
             logger.warning("No device_id in message on %s", topic)
             return
 
-        # ANPR topics: anpr/{device_id}/record, anpr/{device_id}/sync/config
+        # ANPR topics: anpr/{device_id}/record, anpr/{device_id}/sync/config, anpr/{device_id}/status
         if topic.startswith("anpr/"):
+            suffix = _topic_suffix(topic)
             if "/sync/" in topic:
                 handler_name = "_handle_anpr_sync"
+            elif suffix == "status":
+                handler_name = "_handle_device_status"
             else:
                 handler_name = "_handle_anpr_record"
         # Multi-level suffix topics: parking/{id}/sync/camera, parking/{id}/cmd/result

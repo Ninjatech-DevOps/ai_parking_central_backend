@@ -192,6 +192,7 @@ class MQTTTopics:
     # ANPR wildcard subscriptions
     ALL_ANPR_RECORDS = "anpr/+/record"
     ALL_ANPR_SYNC = "anpr/+/sync/#"
+    ALL_ANPR_STATUS = "anpr/+/status"
 
 
 # Permissions
