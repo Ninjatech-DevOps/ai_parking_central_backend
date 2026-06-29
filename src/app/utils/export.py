@@ -1067,25 +1067,28 @@ def generate_public_view_pdf(view: dict) -> io.BytesIO:
 
 
 def generate_parking_history_pdf(items: list, title: str = "AI Parking History Report") -> io.BytesIO:
-    """Landscape card: image left (60%), counts right (40%). 2 records per page.
+    """Portrait card matching the public share URL view:
+    header strip (location + datetime), image left ~64%, count tables right.
 
     Each item: {datetime, location, camera, image_url, car:{o,a,t}, tw:{o,a,t}}.
     """
     try:
-        pdf = ParkingPDF(title, orientation="L")
+        pdf = ParkingPDF(title, orientation="P")
         pdf.alias_nb_pages()
         pdf.set_auto_page_break(False)
         M = 10
         W = pdf.w - 2 * M
         pdf.add_page()
-        _txt(pdf, M, 16, W, f"Total Records: {len(items)}", size=9, color=SLATE_500)
-        y = 22
+        _txt(pdf, M, 20, W, f"Total Records: {len(items)}", size=9, color=SLATE_500)
+        y = 27
 
         for it in items:
-            card_h = 72
-            if y + card_h > pdf.h - 12:
+            content_h = 86
+            header_h = 9.5
+            card_h = header_h + content_h + 5
+            if y + card_h > pdf.h - 14:
                 pdf.add_page()
-                y = 18
+                y = 22
 
             # Card border
             pdf.set_fill_color(*WHITE)
@@ -1093,50 +1096,47 @@ def generate_parking_history_pdf(items: list, title: str = "AI Parking History R
             pdf.set_line_width(0.2)
             pdf.rect(M, y, W, card_h, "FD")
 
-            # Left accent bar
+            # Header strip: location (left), date & time (right)
+            pdf.set_fill_color(*TEAL_50)
+            pdf.rect(M, y, W, header_h, "F")
             pdf.set_fill_color(*TEAL)
-            pdf.rect(M, y, 1.6, card_h, "F")
+            pdf.rect(M, y, 1.6, header_h, "F")
+            _txt(pdf, M + 5, y + 2.4, W * 0.6, it.get("location") or "-", size=10, style="B", color=SLATE_900)
+            _txt(pdf, M + 4, y + 2.4, W - 8, it.get("datetime") or "-", size=8.5, style="B", color=SLATE_500, align="R")
 
-            # ── Left side: Image (58% width) ──
-            img_w = W * 0.58
-            img_pad = 3
-            ix, iy = M + img_pad, y + img_pad
-            iw, ih = img_w - img_pad * 2, card_h - img_pad * 2
+            # Content row: image (left ~64%) + count tables (right ~36%)
+            cy = y + header_h + 2
+            ix = M + 4
+            iw = W * 0.62
 
+            # Image
             drawn = False
             img = _download_image(it.get("image_url"))
             if img:
                 try:
-                    pdf.image(img, x=ix, y=iy, w=iw, h=ih, keep_aspect_ratio=True)
+                    pdf.image(img, x=ix, y=cy, w=iw, h=content_h, keep_aspect_ratio=True)
                     drawn = True
                 except TypeError:
                     try:
-                        pdf.image(img, ix, iy, iw, ih)
+                        pdf.image(img, ix, cy, iw, content_h)
                         drawn = True
                     except Exception:
                         drawn = False
                 except Exception:
                     drawn = False
             if not drawn:
-                pdf._draw_image_placeholder(ix, iy, iw, ih)
+                pdf._draw_image_placeholder(ix, cy, iw, content_h)
 
-            # ── Right side: Info + Counts (40% width) ──
-            rx = M + img_w + 2
-            rw = W - img_w - 4
-
-            # Location name (bold)
-            _txt(pdf, rx, y + 3, rw, it.get("location") or "-", size=10, style="B", color=SLATE_900)
-            # Date & time
-            _txt(pdf, rx, y + 10, rw, it.get("datetime") or "-", size=8, color=SLATE_500)
-
-            # Count cards: Cars + Two Wheeler stacked vertically
-            cy = y + 18
-            ch = 23
+            # Right: two stacked count tables (same as public share view)
+            rx = ix + iw + 5
+            rw = (M + W) - rx - 4
+            t_gap = 4
+            t_h = (content_h - t_gap) / 2
             car, tw = it["car"], it["tw"]
-            _summary_card(pdf, rx, cy, rw, ch, "Cars", BLUE, car["o"], car["a"], car["t"])
-            _summary_card(pdf, rx, cy + ch + 3, rw, ch, "Two Wheeler", INDIGO, tw["o"], tw["a"], tw["t"])
+            _count_table(pdf, rx, cy, rw, t_h, "Cars", BLUE, car["o"], car["a"], car["t"])
+            _count_table(pdf, rx, cy + t_h + t_gap, rw, t_h, "Two Wheeler", INDIGO, tw["o"], tw["a"], tw["t"])
 
-            y += card_h + 4
+            y += card_h + 6
 
         output = io.BytesIO()
         pdf.output(output)
