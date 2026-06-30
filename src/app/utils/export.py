@@ -1583,6 +1583,19 @@ def _thumb_table(pdf, columns, rows, top=14):
                         drawn = False
                 if not drawn:
                     pdf._draw_image_placeholder(tx, ty, tw, th)
+            elif c.get("stack"):
+                # Two values stacked on two lines (e.g. Date over Time).
+                k1, k2 = c["stack"]
+                _txt(pdf, cx + 3, ry + 3.4, wcol - 4, str(r.get(k1, "")), size=8.5, style="B", color=SLATE_700, align="L", h=4)
+                _txt(pdf, cx + 3, ry + 8.4, wcol - 4, str(r.get(k2, "")), size=8, style="", color=SLATE_500, align="L", h=4)
+            elif c.get("wrap"):
+                # Wrapped text (e.g. long Location names) — up to 3 lines.
+                lines = pdf._wrap_text(str(r.get(key, "") or "-"), wcol - 5, 7.5, "")[:3]
+                lh = 3.8
+                ly = ry + (row_h - len(lines) * lh) / 2
+                for ln in lines:
+                    _txt(pdf, cx + 3, ly, wcol - 4, ln, size=7.5, style="", color=SLATE_700, align="L", h=lh)
+                    ly += lh
             else:
                 val = r.get(key, "")
                 color = c.get("color")
@@ -1607,10 +1620,11 @@ def _thumb_table(pdf, columns, rows, top=14):
 
 def generate_anpr_sessions_pdf(meta: dict, summary: dict, rows: list) -> io.BytesIO:
     """ANPR sessions report (same design as the parking occupancy report):
-    summary tiles (Total / Inside / Exited per vehicle type) + sessions table.
+    today's live parking-occupancy tiles (Total / Occupied / Available per
+    vehicle type) + the ANPR sessions records table.
 
     meta: {title, location, status}
-    summary: {car:{total,inside,exited}, bike:{total,inside,exited}}
+    summary: {car:{total,occupied,available}, bike:{total,occupied,available}}
     rows: [{snapshot_url, plate, type, date, in, out, duration, status}]
     """
     try:
@@ -1632,29 +1646,44 @@ def generate_anpr_sessions_pdf(meta: dict, summary: dict, rows: list) -> io.Byte
         _txt(pdf, M, y, W, "Cars", size=10, style="B", color=SLATE_900, h=5)
         y += 7
         _occ_tile(pdf, M, y, tw, th, "Total cars", car.get("total", 0), "neutral")
-        _occ_tile(pdf, M + tw + 6, y, tw, th, "Inside", car.get("inside", 0), "occupied")
-        _occ_tile(pdf, M + 2 * (tw + 6), y, tw, th, "Exited", car.get("exited", 0), "available")
+        _occ_tile(pdf, M + tw + 6, y, tw, th, "Occupied", car.get("occupied", 0), "occupied")
+        _occ_tile(pdf, M + 2 * (tw + 6), y, tw, th, "Available", car.get("available", 0), "available")
         y += th + 6
 
         _txt(pdf, M, y, W, "Two Wheeler", size=10, style="B", color=SLATE_900, h=5)
         y += 7
         _occ_tile(pdf, M, y, tw, th, "Total bikes", bike.get("total", 0), "neutral")
-        _occ_tile(pdf, M + tw + 6, y, tw, th, "Inside", bike.get("inside", 0), "occupied")
-        _occ_tile(pdf, M + 2 * (tw + 6), y, tw, th, "Exited", bike.get("exited", 0), "available")
+        _occ_tile(pdf, M + tw + 6, y, tw, th, "Occupied", bike.get("occupied", 0), "occupied")
+        _occ_tile(pdf, M + 2 * (tw + 6), y, tw, th, "Available", bike.get("available", 0), "available")
         y += th + 7
 
         _txt(pdf, M, y, W, f"Session records ({len(rows)})", size=10, style="B", color=SLATE_900, h=5)
         pdf.set_y(y + 6)
-        columns = [
-            {"header": "Snapshot", "width": 26, "key": "snapshot_url", "align": "L"},
-            {"header": "Plate", "width": 26, "key": "plate", "align": "L", "color": SLATE_900},
-            {"header": "Type", "width": 28, "key": "type", "align": "L"},
-            {"header": "Date", "width": 24, "key": "date", "align": "L"},
-            {"header": "In", "width": 20, "key": "in", "align": "L"},
-            {"header": "Out", "width": 24, "key": "out", "align": "L"},
-            {"header": "Duration", "width": 20, "key": "duration", "align": "C"},
-            {"header": "Status", "width": 22, "key": "status", "align": "C", "color": "status"},
-        ]
+        if meta.get("show_location", False):
+            # All-locations report: add a Location column. Date+In are stacked
+            # into one "Date & Time" cell to make room (sum of widths = 190).
+            columns = [
+                {"header": "Snapshot", "width": 20, "key": "snapshot_url", "align": "L"},
+                {"header": "Location", "width": 27, "key": "location", "align": "L", "wrap": True},
+                {"header": "Plate", "width": 25, "key": "plate", "align": "L", "color": SLATE_900},
+                {"header": "Type", "width": 26, "key": "type", "align": "L"},
+                {"header": "Date & Time", "width": 24, "key": "date", "align": "L", "stack": ("date", "in")},
+                {"header": "Out", "width": 24, "key": "out", "align": "L"},
+                {"header": "Duration", "width": 22, "key": "duration", "align": "C"},
+                {"header": "Status", "width": 22, "key": "status", "align": "C", "color": "status"},
+            ]
+        else:
+            # Single-location report: no Location column (it's in the subtitle).
+            columns = [
+                {"header": "Snapshot", "width": 26, "key": "snapshot_url", "align": "L"},
+                {"header": "Plate", "width": 26, "key": "plate", "align": "L", "color": SLATE_900},
+                {"header": "Type", "width": 28, "key": "type", "align": "L"},
+                {"header": "Date", "width": 24, "key": "date", "align": "L"},
+                {"header": "In", "width": 20, "key": "in", "align": "L"},
+                {"header": "Out", "width": 24, "key": "out", "align": "L"},
+                {"header": "Duration", "width": 20, "key": "duration", "align": "C"},
+                {"header": "Status", "width": 22, "key": "status", "align": "C", "color": "status"},
+            ]
         _thumb_table(pdf, columns, rows)
 
         output = io.BytesIO()

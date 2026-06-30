@@ -43,14 +43,18 @@ class ParkingScanService:
         self,
         location_id: Optional[uuid.UUID] = None,
         location_ids: Optional[Set[uuid.UUID]] = None,
+        since: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """Current occupancy = each location's latest scan, summed across scope.
 
         Single location -> that location's last entry. All locations -> sum of
         every location's latest entry. Shared source of truth for the parking
-        PDF summary cards (and reusable by the AI Parking screen later).
+        PDF summary cards and the ANPR PDF occupancy cards.
+
+        `since`: only count each location's latest scan at/after this time (e.g.
+        start-of-today) -> "today's live occupancy", excluding stale locations.
         """
-        scans = await self.repo.latest_per_location(location_id, location_ids)
+        scans = await self.repo.latest_per_location(location_id, location_ids, since)
         car = {"total": 0, "occupied": 0, "available": 0}
         bike = {"total": 0, "occupied": 0, "available": 0}
         latest_recorded_at: Optional[datetime] = None

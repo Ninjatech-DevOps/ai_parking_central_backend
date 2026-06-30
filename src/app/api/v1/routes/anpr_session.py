@@ -15,6 +15,8 @@ from src.app.core.constants import Permission
 from src.app.db.session import get_db
 from src.app.models.location import Location
 from src.app.repositories.anpr_session import AnprSessionRepository
+from src.app.repositories.parking_scan import ParkingScanRepository
+from src.app.services.parking_scan import ParkingScanService
 from src.app.schemas.anpr_session import AnprSessionResponse
 from src.app.schemas.base import MessageResponse, PaginatedResponse
 from src.app.services.anpr_session import AnprSessionService
@@ -190,6 +192,7 @@ async def export_sessions_pdf(
     service: AnprSessionService = Depends(_get_service),
     _: bool = Depends(PermissionChecker(Permission.ANPR_EXPORT)),
     user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
+    db: AsyncSession = Depends(get_db),
 ):
     start = _parse_date(start_date)
     end = _parse_date(end_date)
@@ -198,16 +201,13 @@ async def export_sessions_pdf(
     )
 
     ist = timedelta(hours=5, minutes=30)
+    # ANPR session rows (records table) — honour the selected date range.
     rows = []
-    summary = {"car": {"total": 0, "inside": 0, "exited": 0},
-               "bike": {"total": 0, "inside": 0, "exited": 0}}
     for s in items:
         is_car = _ev(s.vehicle_type) == "CAR"
-        key = "car" if is_car else "bike"
-        summary[key]["total"] += 1
-        summary[key]["inside" if s.is_active else "exited"] += 1
         rows.append({
             "snapshot_url": s.entry_image_url or "",
+            "location": s.location.name if s.location else "",
             "plate": s.number_plate or "N/A",
             "type": "Car" if is_car else "Two Wheeler",
             "date": (s.entry_time + ist).strftime("%d %b %Y"),
@@ -217,12 +217,34 @@ async def export_sessions_pdf(
             "status": "Inside" if s.is_active else "Exited",
         })
 
+    # Summary cards = TODAY's live parking occupancy (latest scan per location,
+    # summed) — independent of the ANPR date range. Single location -> that lot;
+    # all locations -> sum. Stale lots (no scan today) are excluded.
+    today_ist_midnight = (datetime.utcnow() + ist).replace(hour=0, minute=0, second=0, microsecond=0)
+    since_utc = today_ist_midnight - ist
+    parking_service = ParkingScanService(ParkingScanRepository(db))
+    occ = await parking_service.current_occupancy_summary(location_id, user_location_ids, since=since_utc)
+    summary = {"car": occ["car"], "bike": occ["bike"]}
+
+    location_name = "All locations"
+    if location_id:
+        res = await db.execute(sa_select(Location.name).where(Location.id == location_id))
+        location_name = res.scalar_one_or_none() or "All locations"
+
+    occ_dt = occ.get("latest_recorded_at")
     latest = max(items, key=lambda s: s.entry_time) if items else None
-    location_name = (latest.location.name if (latest and latest.location) else None) or "All locations"
+    if occ_dt:
+        status = f"Updated {(occ_dt + ist).strftime('%d %b %Y, %I:%M %p')}"
+    elif latest:
+        status = f"Updated {(latest.entry_time + ist).strftime('%d %b %Y, %I:%M %p')}"
+    else:
+        status = "No data"
     meta = {
         "title": "ANPR Sessions Report",
         "location": location_name,
-        "status": f"Updated {(latest.entry_time + ist).strftime('%d %b %Y, %I:%M %p')}" if latest else "No data",
+        "status": status,
+        # Location column in the table only when reporting across locations.
+        "show_location": location_id is None,
     }
 
     # Off the event loop (image downloads block) so the worker stays responsive.

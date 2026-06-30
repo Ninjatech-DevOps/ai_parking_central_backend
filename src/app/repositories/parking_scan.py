@@ -79,6 +79,7 @@ class ParkingScanRepository(BaseRepository[ParkingScan]):
         self,
         location_id: Optional[uuid.UUID] = None,
         location_ids: Optional[Set[uuid.UUID]] = None,
+        since: Optional[datetime] = None,
     ) -> List[ParkingScan]:
         """Return the most recent scan for each location in scope.
 
@@ -86,13 +87,16 @@ class ParkingScanRepository(BaseRepository[ParkingScan]):
         each location contributes exactly its latest reading. For a single
         location this is just its last entry; with no location filter it returns
         one latest row per location across the scope (to be summed by the caller).
+
+        `since`: only consider scans at/after this time (e.g. start-of-today), so
+        locations with no recent reading are excluded — "today's live occupancy".
         """
         query = (
             select(ParkingScan)
             .distinct(ParkingScan.location_id)
             .order_by(ParkingScan.location_id, ParkingScan.recorded_at.desc(), ParkingScan.id.desc())
         )
-        query = self._apply_filters(query, location_id, location_ids, None, None)
+        query = self._apply_filters(query, location_id, location_ids, since, None)
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
