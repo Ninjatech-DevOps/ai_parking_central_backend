@@ -223,33 +223,32 @@ async def export_scans_pdf(
     for s in items:
         rows.append({
             "snapshot_url": _clean_frame_url(s.image_url),
+            "location": s.location.name if s.location else "",
             "date": _fmt_date(s.recorded_at),
             "time": _fmt_time(s.recorded_at),
             "occ_car": s.car_occupied,
             "avl_car": s.car_available,
+            "tot_car": s.car_total,
             "occ_bike": s.two_wheeler_occupied,
             "avl_bike": s.two_wheeler_available,
+            "tot_bike": s.two_wheeler_total,
         })
 
-    # Summary = the latest snapshot in range (most recent recorded_at).
-    latest = max(items, key=lambda s: s.recorded_at) if items else None
-    summary = {
-        "car": {
-            "total": latest.car_total if latest else 0,
-            "occupied": latest.car_occupied if latest else 0,
-            "available": latest.car_available if latest else 0,
-        },
-        "bike": {
-            "total": latest.two_wheeler_total if latest else 0,
-            "occupied": latest.two_wheeler_occupied if latest else 0,
-            "available": latest.two_wheeler_available if latest else 0,
-        },
-    }
-    location_name = (latest.location.name if (latest and latest.location) else None) or "All locations"
+    # Summary cards = each location's latest scan, summed across scope.
+    # Single location -> that location's last entry; all -> sum of every
+    # location's latest entry (shared ParkingScanService.current_occupancy_summary).
+    summary = await service.current_occupancy_summary(location_id, scoped_ids)
+    recorded_at = summary.get("latest_recorded_at")
+
+    location_name = "All locations"
+    if location_id:
+        loc = await db.execute(select(LocationModel.name).where(LocationModel.id == location_id))
+        location_name = loc.scalar_one_or_none() or "All locations"
+
     meta = {
         "title": "Parking Occupancy Report",
         "location": location_name,
-        "status": f"Updated {_fmt_date(latest.recorded_at)}, {_fmt_time(latest.recorded_at)}" if latest else "No data",
+        "status": f"Updated {_fmt_date(recorded_at)}, {_fmt_time(recorded_at)}" if recorded_at else "No data",
     }
 
     # Run PDF generation (which downloads images, blocking) off the event loop

@@ -39,5 +39,36 @@ class ParkingScanService:
             location_id, location_ids, start_date, end_date, interval_minutes
         )
 
+    async def current_occupancy_summary(
+        self,
+        location_id: Optional[uuid.UUID] = None,
+        location_ids: Optional[Set[uuid.UUID]] = None,
+    ) -> Dict[str, Any]:
+        """Current occupancy = each location's latest scan, summed across scope.
+
+        Single location -> that location's last entry. All locations -> sum of
+        every location's latest entry. Shared source of truth for the parking
+        PDF summary cards (and reusable by the AI Parking screen later).
+        """
+        scans = await self.repo.latest_per_location(location_id, location_ids)
+        car = {"total": 0, "occupied": 0, "available": 0}
+        bike = {"total": 0, "occupied": 0, "available": 0}
+        latest_recorded_at: Optional[datetime] = None
+        for s in scans:
+            car["total"] += s.car_total or 0
+            car["occupied"] += s.car_occupied or 0
+            car["available"] += s.car_available or 0
+            bike["total"] += s.two_wheeler_total or 0
+            bike["occupied"] += s.two_wheeler_occupied or 0
+            bike["available"] += s.two_wheeler_available or 0
+            if latest_recorded_at is None or s.recorded_at > latest_recorded_at:
+                latest_recorded_at = s.recorded_at
+        return {
+            "car": car,
+            "bike": bike,
+            "location_count": len(scans),
+            "latest_recorded_at": latest_recorded_at,
+        }
+
     async def update_scan(self, scan_id: uuid.UUID, data: Dict[str, Any]) -> ParkingScan:
         return await self.repo.update(scan_id, data)

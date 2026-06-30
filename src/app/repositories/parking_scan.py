@@ -29,7 +29,10 @@ class ParkingScanRepository(BaseRepository[ParkingScan]):
             )
         query = select(ParkingScan)
         query = self._apply_filters(query, location_id, location_ids, start_date, end_date)
-        query = query.order_by(ParkingScan.recorded_at.desc()).offset(skip).limit(limit)
+        # id desc as a deterministic tiebreak so rows that share recorded_at
+        # (e.g. demo data) order consistently — and the summary's "latest per
+        # location" pick matches the first row shown here.
+        query = query.order_by(ParkingScan.recorded_at.desc(), ParkingScan.id.desc()).offset(skip).limit(limit)
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
@@ -70,6 +73,27 @@ class ParkingScanRepository(BaseRepository[ParkingScan]):
             .limit(limit)
         )
         result = await self.db.execute(final)
+        return list(result.scalars().all())
+
+    async def latest_per_location(
+        self,
+        location_id: Optional[uuid.UUID] = None,
+        location_ids: Optional[Set[uuid.UUID]] = None,
+    ) -> List[ParkingScan]:
+        """Return the most recent scan for each location in scope.
+
+        Uses Postgres DISTINCT ON (location_id) ordered by recorded_at DESC, so
+        each location contributes exactly its latest reading. For a single
+        location this is just its last entry; with no location filter it returns
+        one latest row per location across the scope (to be summed by the caller).
+        """
+        query = (
+            select(ParkingScan)
+            .distinct(ParkingScan.location_id)
+            .order_by(ParkingScan.location_id, ParkingScan.recorded_at.desc(), ParkingScan.id.desc())
+        )
+        query = self._apply_filters(query, location_id, location_ids, None, None)
+        result = await self.db.execute(query)
         return list(result.scalars().all())
 
     async def count_filtered(
