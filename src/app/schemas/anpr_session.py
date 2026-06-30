@@ -6,6 +6,11 @@ from src.app.core.constants import VehicleType
 from src.app.schemas.base import BaseSchema, BaseResponse
 
 
+class AnprSessionUpdate(BaseSchema):
+    number_plate: Optional[str] = None
+    vehicle_type: Optional[str] = None
+
+
 class AnprSessionResponse(BaseResponse):
     location_id: uuid.UUID
     city_id: Optional[uuid.UUID]

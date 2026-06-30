@@ -94,8 +94,11 @@ async def _process(device_id_str: str, payload: dict):
             db.add(record)
             await db.flush()
 
-            # Session matching
-            if direction == AnprDirection.IN:
+            # Session matching — skip for unreadable plates (N/A etc.)
+            _skip_session = number_plate in ("N/A", "NA", "UNKNOWN", "NONE", "-", "")
+            if _skip_session:
+                logger.info("ANPR: skipping session for unreadable plate '%s'", number_plate)
+            elif direction == AnprDirection.IN:
                 # Create new session
                 session = AnprSession(
                     location_id=device.location_id,

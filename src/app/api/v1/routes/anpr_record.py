@@ -15,7 +15,7 @@ from src.app.core.constants import Permission
 from src.app.db.session import get_db
 from src.app.models.location import Location
 from src.app.repositories.anpr_record import AnprRecordRepository
-from src.app.schemas.anpr_record import AnprRecordResponse
+from src.app.schemas.anpr_record import AnprRecordResponse, AnprRecordUpdate
 from src.app.schemas.base import PaginatedResponse
 from src.app.services.anpr_record import AnprRecordService
 from src.app.utils.export import generate_excel, generate_pdf_with_images
@@ -97,6 +97,23 @@ async def list_records(
         response_items.append(resp)
 
     return build_paginated_response(response_items, total, page, limit)
+
+
+@router.patch("/{record_id}", response_model=AnprRecordResponse)
+async def update_record(
+    record_id: uuid.UUID,
+    body: AnprRecordUpdate,
+    service: AnprRecordService = Depends(_get_service),
+    _: bool = Depends(PermissionChecker(Permission.ANPR_CONFIGURE)),
+):
+    record = await service.update(record_id, body.model_dump(exclude_unset=True))
+    if not record:
+        from src.app.exceptions.base import NotFoundException
+        raise NotFoundException(detail="Record not found")
+    resp = AnprRecordResponse.model_validate(record)
+    if record.location:
+        resp.location_name = record.location.name
+    return resp
 
 
 @router.get("/export-csv")
