@@ -4,7 +4,7 @@ import io
 import logging
 import tempfile
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 import requests
@@ -56,7 +56,7 @@ def _download_image(url: str) -> Optional[str]:
         return None
     if url in _image_cache:
         return _image_cache[url]
-
+        
     try:
         resp = requests.get(url, timeout=8, stream=True)
         if resp.status_code != 200:
@@ -216,7 +216,9 @@ class ParkingPDF(FPDF):
         self.set_xy(10, 4)
         self.cell(0, 10, self.report_title, align="L")
         self.set_font("Helvetica", "", 9)
-        self.cell(0, 10, datetime.now().strftime("%d %b %Y, %I:%M %p"), align="R")
+        # IST (UTC+5:30) — the container clock is UTC.
+        ist_now = datetime.now() + timedelta(hours=5, minutes=30)
+        self.cell(0, 10, ist_now.strftime("%d %b %Y, %I:%M %p"), align="R")
         self.set_y(22)
 
     def footer(self):
@@ -1073,7 +1075,8 @@ def generate_public_view_pdf(view: dict) -> io.BytesIO:
         _cleanup_image_cache()
 
 
-def generate_parking_history_pdf(items: list, title: str = "AI Parking History Report") -> io.BytesIO:
+# LEGACY card-per-scan layout — kept for easy rollback; not currently wired.
+def generate_parking_history_pdf_legacy(items: list, title: str = "AI Parking History Report") -> io.BytesIO:
     """Portrait layout matching public share view:
     header strip (location + datetime), image left ~78%, count tables right.
 
@@ -1144,6 +1147,449 @@ def generate_parking_history_pdf(items: list, title: str = "AI Parking History R
             _count_table(pdf, rx, cy + t_h + t_gap, rw, t_h, "Two Wheeler", INDIGO, tw["o"], tw["a"], tw["t"])
 
             y += card_h + 6
+
+        output = io.BytesIO()
+        pdf.output(output)
+        output.seek(0)
+        return output
+    finally:
+        _cleanup_image_cache()
+
+
+def _anpr_val_color(v: str):
+    if v in ("Inside", "Active", "Still Parked"):
+        return TEAL
+    if v in ("Exited", "Completed"):
+        return SLATE_700
+    return SLATE_900
+
+
+def _detail_table(pdf, x, y, w, h, title, accent, is_car, rows):
+    """Right-side detail panel: vehicle icon + title, then label/value rows."""
+    pdf.set_fill_color(*WHITE)
+    pdf.set_draw_color(*SLATE_300)
+    pdf.set_line_width(0.2)
+    pdf.rect(x, y, w, h, "FD")
+    pdf.set_fill_color(*accent)
+    pdf.rect(x, y, w, 1.4, "F")
+
+    # Icon + title (centered)
+    s = 0.7
+    pdf.set_font("Helvetica", "B", 9)
+    text_w = pdf.get_string_width(title)
+    icon_w = 7 * s
+    gap = 1.5
+    gx = x + (w - (icon_w + gap + text_w)) / 2
+    icy = y + 7
+    _draw_vehicle_icon(pdf, gx, icy, is_car, accent, s=s)
+    _txt(pdf, gx + icon_w + gap, icy - 2.5, text_w + 4, title, size=9, style="B", color=accent, h=5)
+
+    # Rows: label left, value right (wrapped)
+    ry = y + 12
+    row_h = (y + h - ry - 2) / max(len(rows), 1)
+    lw = w * 0.32
+    vw = w - lw - 7
+    for i, (lbl, val) in enumerate(rows):
+        cyr = ry + i * row_h
+        if i > 0:
+            pdf.set_draw_color(*SLATE_100)
+            pdf.set_line_width(0.2)
+            pdf.line(x + 3, cyr, x + w - 3, cyr)
+        _txt(pdf, x + 4, cyr + row_h / 2 - 2.2, lw, str(lbl).upper(), size=6, style="B", color=SLATE_400, h=4)
+        vlines = pdf._wrap_text(str(val) if val not in (None, "") else "-", vw, 8, "B")[:2]
+        vstart = cyr + row_h / 2 - (len(vlines) * 4) / 2
+        for j, ln in enumerate(vlines):
+            _txt(pdf, x + lw + 4, vstart + j * 4, vw, ln, size=8, style="B",
+                 color=_anpr_val_color(str(val)), align="L", h=4)
+
+
+# LEGACY card-per-session layout — kept for easy rollback; not currently wired.
+def generate_anpr_sessions_pdf_legacy(items: list, title: str = "ANPR Sessions Report") -> io.BytesIO:
+    """Same card design as parking history: header strip (location + datetime),
+    image on the left, a detail panel (vehicle icon + fields) on the right.
+
+    Each item: {location, datetime, image_url, type, is_car, rows:[(label,value)]}.
+    """
+    try:
+        pdf = ParkingPDF(title, orientation="P")
+        pdf.alias_nb_pages()
+        pdf.set_auto_page_break(False)
+        M = 10
+        W = pdf.w - 2 * M
+        pdf.add_page()
+        _txt(pdf, M, 20, W, f"Total Records: {len(items)}", size=9, color=SLATE_500)
+        y = 27
+
+        for it in items:
+            content_h = 110
+            header_h = 9.5
+            card_h = header_h + content_h + 5
+            if y + card_h > pdf.h - 14:
+                pdf.add_page()
+                y = 22
+
+            pdf.set_fill_color(*WHITE)
+            pdf.set_draw_color(*SLATE_300)
+            pdf.set_line_width(0.2)
+            pdf.rect(M, y, W, card_h, "FD")
+
+            # Header strip: location (left) + datetime (right)
+            pdf.set_fill_color(*TEAL_50)
+            pdf.rect(M, y, W, header_h, "F")
+            pdf.set_fill_color(*TEAL)
+            pdf.rect(M, y, 1.6, header_h, "F")
+            _txt(pdf, M + 5, y + 2.4, W * 0.6, it.get("location") or "-", size=10, style="B", color=SLATE_900)
+            _txt(pdf, M + 4, y + 2.4, W - 8, it.get("datetime") or "-", size=8.5, style="B", color=SLATE_500, align="R")
+
+            # Content: image left, detail panel right
+            cy = y + header_h + 2
+            ix = M + 3
+            iw = W * 0.64
+            rx = ix + iw + 2
+            rw = (M + W) - rx - 2
+
+            img = _download_image(it.get("image_url"))
+            drawn = False
+            if img:
+                try:
+                    pdf.image(img, x=ix, y=cy, w=iw, h=content_h, keep_aspect_ratio=True)
+                    drawn = True
+                except TypeError:
+                    try:
+                        pdf.image(img, ix, cy, iw, content_h)
+                        drawn = True
+                    except Exception:
+                        drawn = False
+                except Exception:
+                    drawn = False
+            if not drawn:
+                pdf._draw_image_placeholder(ix, cy, iw, content_h)
+
+            accent = BLUE if it.get("is_car") else INDIGO
+            _detail_table(pdf, rx, cy, rw, content_h, it.get("type") or "Vehicle",
+                          accent, bool(it.get("is_car")), it.get("rows") or [])
+
+            y += card_h + 6
+
+        output = io.BytesIO()
+        pdf.output(output)
+        output.seek(0)
+        return output
+    finally:
+        _cleanup_image_cache()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Parking occupancy report (table layout) — matches the web "Parking occupancy
+# report" page: Cars/Bikes summary tiles + an occupancy-records table with
+# per-row snapshot thumbnails. (Card-per-scan layout preserved as *_legacy.)
+# ─────────────────────────────────────────────────────────────────────────────
+def _occ_tile(pdf, x, y, w, h, label, value, kind="neutral"):
+    """Summary tile: accent bar + status dot + label + big value.
+    kind: neutral (grey) / occupied (red) / available (green)."""
+    if kind == "occupied":
+        accent, bg, vcol = RED, _tint(RED, 0.93), RED
+    elif kind == "available":
+        accent, bg, vcol = EMERALD, _tint(EMERALD, 0.93), EMERALD
+    else:
+        accent, bg, vcol = SLATE_400, SLATE_50, SLATE_900
+
+    # Card
+    pdf.set_fill_color(*bg)
+    pdf.set_draw_color(*_tint(accent, 0.45))
+    pdf.set_line_width(0.3)
+    try:
+        pdf.rect(x, y, w, h, "FD", round_corners=True, corner_radius=3)
+    except TypeError:
+        pdf.rect(x, y, w, h, "FD")
+
+    # Left accent bar
+    pdf.set_fill_color(*accent)
+    try:
+        pdf.rect(x, y, 2, h, "F", round_corners=True, corner_radius=1)
+    except TypeError:
+        pdf.rect(x, y, 2, h, "F")
+
+    # Status dot + label
+    pdf.set_fill_color(*accent)
+    pdf.ellipse(x + 7, y + 6.4, 2.2, 2.2, "F")
+    _txt(pdf, x + 11, y + 5.4, w - 14, label.upper(), size=7.5, style="B", color=SLATE_500, h=4)
+
+    # Big value
+    _txt(pdf, x + 8, y + h - 13, w - 12, str(value), size=22, style="B", color=vcol, h=12)
+
+
+def _records_table(pdf, rows, top=26):
+    """Occupancy-records table with a snapshot thumbnail column."""
+    M = 10
+    W = pdf.w - 2 * M
+    headers = ["Snapshot", "Date", "Time", "Occ. car", "Avl. car", "Occ. bike", "Avl. bike"]
+    widths = [28, 26, 20, 29, 29, 29, 29]   # sum = 190
+    row_h = 15
+
+    def draw_header():
+        pdf.set_x(M)
+        pdf.set_font("Helvetica", "B", 7.5)
+        pdf.set_fill_color(*TEAL)
+        pdf.set_text_color(*WHITE)
+        for i, hh in enumerate(headers):
+            align = "L" if i <= 2 else "C"
+            pdf.cell(widths[i], 8, _fit_text(pdf, hh, widths[i]), border=0, fill=True, align=align)
+        pdf.ln()
+
+    draw_header()
+    for ri, r in enumerate(rows):
+        if pdf.get_y() + row_h > pdf.h - 14:
+            pdf.add_page()
+            pdf.set_y(top)
+            draw_header()
+        ry = pdf.get_y()
+        # Zebra background + row separator
+        pdf.set_fill_color(*(SLATE_50 if ri % 2 else WHITE))
+        pdf.rect(M, ry, W, row_h, "F")
+        pdf.set_draw_color(*SLATE_100)
+        pdf.set_line_width(0.2)
+        pdf.line(M, ry + row_h, M + W, ry + row_h)
+
+        # Snapshot thumbnail
+        tx, ty = M + 2, ry + 2
+        tw, th = widths[0] - 4, row_h - 4
+        img = _download_image(r.get("snapshot_url"))
+        drawn = False
+        if img:
+            try:
+                pdf.image(img, x=tx, y=ty, w=tw, h=th, keep_aspect_ratio=True)
+                drawn = True
+            except TypeError:
+                try:
+                    pdf.image(img, tx, ty, tw, th)
+                    drawn = True
+                except Exception:
+                    drawn = False
+            except Exception:
+                drawn = False
+        if not drawn:
+            pdf._draw_image_placeholder(tx, ty, tw, th)
+
+        # Data cells
+        cx = M + widths[0]
+        vmid = ry + row_h / 2 - 2
+        cells = [
+            (r.get("date", ""), SLATE_700, "L"),
+            (r.get("time", ""), SLATE_700, "L"),
+            (r.get("occ_car", 0), RED, "C"),
+            (r.get("avl_car", 0), EMERALD, "C"),
+            (r.get("occ_bike", 0), RED, "C"),
+            (r.get("avl_bike", 0), EMERALD, "C"),
+        ]
+        for i, (val, color, align) in enumerate(cells):
+            wcol = widths[i + 1]
+            pad = 2 if align == "L" else 0
+            _txt(pdf, cx + pad, vmid, wcol - pad, str(val), size=9, style="B", color=color, align=align, h=4)
+            cx += wcol
+        pdf.set_y(ry + row_h)
+
+
+def generate_parking_history_pdf(meta: dict, summary: dict, rows: list) -> io.BytesIO:
+    """Parking occupancy report: Cars/Bikes summary tiles + occupancy-records table.
+
+    meta: {title, location, status}
+    summary: {car:{total,occupied,available}, bike:{total,occupied,available}}
+    rows: [{snapshot_url, date, time, occ_car, avl_car, occ_bike, avl_bike}]
+    """
+    try:
+        pdf = ParkingPDF(meta.get("title") or "Parking Occupancy Report", orientation="P")
+        pdf.alias_nb_pages()
+        pdf.set_auto_page_break(False)
+        M = 10
+        W = pdf.w - 2 * M
+        pdf.add_page()
+
+        # Location subtitle + status pill
+        _txt(pdf, M, 20, W * 0.68, meta.get("location") or "", size=9, color=SLATE_500)
+        status = meta.get("status") or ""
+        if status:
+            pdf.set_font("Helvetica", "B", 7)
+            pw = pdf.get_string_width(status) + 8
+            px, py = M + W - pw, 18.5
+            pdf.set_fill_color(*_tint(TEAL, 0.85))
+            pdf.set_draw_color(*_tint(TEAL, 0.5))
+            pdf.set_line_width(0.2)
+            try:
+                pdf.rect(px, py, pw, 6, "FD", round_corners=True, corner_radius=3)
+            except TypeError:
+                pdf.rect(px, py, pw, 6, "FD")
+            _txt(pdf, px, py + 1.4, pw, status, size=7, style="B", color=TEAL, align="C", h=3.5)
+
+        car = summary.get("car", {})
+        bike = summary.get("bike", {})
+        tw = (W - 2 * 6) / 3
+        th = 26
+
+        y = 28
+        _txt(pdf, M, y, W, "Cars", size=10, style="B", color=SLATE_900, h=5)
+        y += 7
+        _occ_tile(pdf, M, y, tw, th, "Total cars", car.get("total", 0), "neutral")
+        _occ_tile(pdf, M + tw + 6, y, tw, th, "Occupied", car.get("occupied", 0), "occupied")
+        _occ_tile(pdf, M + 2 * (tw + 6), y, tw, th, "Available", car.get("available", 0), "available")
+        y += th + 7
+
+        _txt(pdf, M, y, W, "Bikes", size=10, style="B", color=SLATE_900, h=5)
+        y += 7
+        _occ_tile(pdf, M, y, tw, th, "Total bikes", bike.get("total", 0), "neutral")
+        _occ_tile(pdf, M + tw + 6, y, tw, th, "Occupied", bike.get("occupied", 0), "occupied")
+        _occ_tile(pdf, M + 2 * (tw + 6), y, tw, th, "Available", bike.get("available", 0), "available")
+        y += th + 8
+
+        _txt(pdf, M, y, W, f"Occupancy records ({len(rows)})", size=10, style="B", color=SLATE_900, h=5)
+        pdf.set_y(y + 6)
+        _records_table(pdf, rows)
+
+        output = io.BytesIO()
+        pdf.output(output)
+        output.seek(0)
+        return output
+    finally:
+        _cleanup_image_cache()
+
+
+def _thumb_table(pdf, columns, rows, top=26):
+    """Generic records table with a snapshot-thumbnail first column.
+
+    columns: [{header, width, key, align, color}]. The column whose key is
+    'snapshot_url' renders a thumbnail. `color` may be an RGB tuple, the string
+    'status' (Inside/Active/Still Parked -> teal, else slate), or omitted.
+    """
+    M = 10
+    W = pdf.w - 2 * M
+    row_h = 15
+
+    def draw_header():
+        pdf.set_x(M)
+        pdf.set_font("Helvetica", "B", 7.5)
+        pdf.set_fill_color(*TEAL)
+        pdf.set_text_color(*WHITE)
+        for c in columns:
+            pdf.cell(c["width"], 8, _fit_text(pdf, c["header"], c["width"]), border=0, fill=True, align=c.get("align", "L"))
+        pdf.ln()
+
+    draw_header()
+    for ri, r in enumerate(rows):
+        if pdf.get_y() + row_h > pdf.h - 14:
+            pdf.add_page()
+            pdf.set_y(top)
+            draw_header()
+        ry = pdf.get_y()
+        pdf.set_fill_color(*(SLATE_50 if ri % 2 else WHITE))
+        pdf.rect(M, ry, W, row_h, "F")
+        pdf.set_draw_color(*SLATE_100)
+        pdf.set_line_width(0.2)
+        pdf.line(M, ry + row_h, M + W, ry + row_h)
+
+        cx = M
+        vmid = ry + row_h / 2 - 2
+        for c in columns:
+            wcol = c["width"]
+            key = c["key"]
+            if key == "snapshot_url":
+                tx, ty = cx + 2, ry + 2
+                tw, th = wcol - 4, row_h - 4
+                img = _download_image(r.get(key))
+                drawn = False
+                if img:
+                    try:
+                        pdf.image(img, x=tx, y=ty, w=tw, h=th, keep_aspect_ratio=True)
+                        drawn = True
+                    except TypeError:
+                        try:
+                            pdf.image(img, tx, ty, tw, th)
+                            drawn = True
+                        except Exception:
+                            drawn = False
+                    except Exception:
+                        drawn = False
+                if not drawn:
+                    pdf._draw_image_placeholder(tx, ty, tw, th)
+            else:
+                val = r.get(key, "")
+                color = c.get("color")
+                if color == "status":
+                    col = TEAL if str(val) in ("Inside", "Active", "Still Parked") else SLATE_700
+                elif isinstance(color, tuple):
+                    col = color
+                else:
+                    col = SLATE_700
+                align = c.get("align", "L")
+                pad = 2 if align == "L" else 0
+                _txt(pdf, cx + pad, vmid, wcol - pad, str(val), size=8.5, style="B", color=col, align=align, h=4)
+            cx += wcol
+        pdf.set_y(ry + row_h)
+
+
+def generate_anpr_sessions_pdf(meta: dict, summary: dict, rows: list) -> io.BytesIO:
+    """ANPR sessions report (same design as the parking occupancy report):
+    summary tiles (Total / Inside / Exited per vehicle type) + sessions table.
+
+    meta: {title, location, status}
+    summary: {car:{total,inside,exited}, bike:{total,inside,exited}}
+    rows: [{snapshot_url, plate, type, date, in, out, duration, status}]
+    """
+    try:
+        pdf = ParkingPDF(meta.get("title") or "ANPR Sessions Report", orientation="P")
+        pdf.alias_nb_pages()
+        pdf.set_auto_page_break(False)
+        M = 10
+        W = pdf.w - 2 * M
+        pdf.add_page()
+
+        _txt(pdf, M, 20, W * 0.68, meta.get("location") or "", size=9, color=SLATE_500)
+        status = meta.get("status") or ""
+        if status:
+            pdf.set_font("Helvetica", "B", 7)
+            pw = pdf.get_string_width(status) + 8
+            px, py = M + W - pw, 18.5
+            pdf.set_fill_color(*_tint(TEAL, 0.85))
+            pdf.set_draw_color(*_tint(TEAL, 0.5))
+            pdf.set_line_width(0.2)
+            try:
+                pdf.rect(px, py, pw, 6, "FD", round_corners=True, corner_radius=3)
+            except TypeError:
+                pdf.rect(px, py, pw, 6, "FD")
+            _txt(pdf, px, py + 1.4, pw, status, size=7, style="B", color=TEAL, align="C", h=3.5)
+
+        car = summary.get("car", {})
+        bike = summary.get("bike", {})
+        tw = (W - 2 * 6) / 3
+        th = 26
+
+        y = 28
+        _txt(pdf, M, y, W, "Cars", size=10, style="B", color=SLATE_900, h=5)
+        y += 7
+        _occ_tile(pdf, M, y, tw, th, "Total cars", car.get("total", 0), "neutral")
+        _occ_tile(pdf, M + tw + 6, y, tw, th, "Inside", car.get("inside", 0), "occupied")
+        _occ_tile(pdf, M + 2 * (tw + 6), y, tw, th, "Exited", car.get("exited", 0), "available")
+        y += th + 7
+
+        _txt(pdf, M, y, W, "Two Wheeler", size=10, style="B", color=SLATE_900, h=5)
+        y += 7
+        _occ_tile(pdf, M, y, tw, th, "Total bikes", bike.get("total", 0), "neutral")
+        _occ_tile(pdf, M + tw + 6, y, tw, th, "Inside", bike.get("inside", 0), "occupied")
+        _occ_tile(pdf, M + 2 * (tw + 6), y, tw, th, "Exited", bike.get("exited", 0), "available")
+        y += th + 8
+
+        _txt(pdf, M, y, W, f"Session records ({len(rows)})", size=10, style="B", color=SLATE_900, h=5)
+        pdf.set_y(y + 6)
+        columns = [
+            {"header": "Snapshot", "width": 26, "key": "snapshot_url", "align": "L"},
+            {"header": "Plate", "width": 26, "key": "plate", "align": "L", "color": SLATE_900},
+            {"header": "Type", "width": 24, "key": "type", "align": "L"},
+            {"header": "Date", "width": 24, "key": "date", "align": "L"},
+            {"header": "In", "width": 20, "key": "in", "align": "L"},
+            {"header": "Out", "width": 24, "key": "out", "align": "L"},
+            {"header": "Duration", "width": 22, "key": "duration", "align": "C"},
+            {"header": "Status", "width": 24, "key": "status", "align": "C", "color": "status"},
+        ]
+        _thumb_table(pdf, columns, rows)
 
         output = io.BytesIO()
         pdf.output(output)

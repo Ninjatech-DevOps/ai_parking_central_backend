@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Set
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +18,7 @@ from src.app.repositories.anpr_session import AnprSessionRepository
 from src.app.schemas.anpr_session import AnprSessionResponse
 from src.app.schemas.base import MessageResponse, PaginatedResponse
 from src.app.services.anpr_session import AnprSessionService
-from src.app.utils.export import generate_excel, generate_pdf_with_images
+from src.app.utils.export import generate_excel, generate_anpr_sessions_pdf
 from src.app.utils.pagination import build_paginated_response, get_pagination_params
 
 router = APIRouter(prefix="/anpr-sessions", tags=["ANPR Sessions"])
@@ -197,24 +198,35 @@ async def export_sessions_pdf(
     )
 
     ist = timedelta(hours=5, minutes=30)
-    records = []
+    rows = []
+    summary = {"car": {"total": 0, "inside": 0, "exited": 0},
+               "bike": {"total": 0, "inside": 0, "exited": 0}}
     for s in items:
-        duration = AnprSessionService.format_duration(s.entry_time, s.exit_time)
-        records.append({
-            "image_url": s.entry_image_url or "",
-            "fields": [
-                ("Plate", s.number_plate),
-                ("Type", _ev(s.vehicle_type)),
-                ("Date", (s.entry_time + ist).strftime("%d %b %Y")),
-                ("In", (s.entry_time + ist).strftime("%I:%M %p")),
-                ("Out", (s.exit_time + ist).strftime("%d %b, %I:%M %p") if s.exit_time else "Still Parked"),
-                ("Duration", duration or "Active"),
-                ("Status", "Active" if s.is_active else "Completed"),
-                ("Location", s.location.name if s.location else "-"),
-            ],
+        is_car = _ev(s.vehicle_type) == "CAR"
+        key = "car" if is_car else "bike"
+        summary[key]["total"] += 1
+        summary[key]["inside" if s.is_active else "exited"] += 1
+        rows.append({
+            "snapshot_url": s.entry_image_url or "",
+            "plate": s.number_plate or "N/A",
+            "type": "Car" if is_car else "Two Wheeler",
+            "date": (s.entry_time + ist).strftime("%d %b %Y"),
+            "in": (s.entry_time + ist).strftime("%I:%M %p"),
+            "out": (s.exit_time + ist).strftime("%d %b, %I:%M %p") if s.exit_time else "Still Parked",
+            "duration": AnprSessionService.format_duration(s.entry_time, s.exit_time) or "Active",
+            "status": "Inside" if s.is_active else "Exited",
         })
 
-    output = generate_pdf_with_images("ANPR Sessions Report", records)
+    latest = max(items, key=lambda s: s.entry_time) if items else None
+    location_name = (latest.location.name if (latest and latest.location) else None) or "All locations"
+    meta = {
+        "title": "ANPR Sessions Report",
+        "location": location_name,
+        "status": f"Updated {(latest.entry_time + ist).strftime('%d %b %Y, %I:%M %p')}" if latest else "No data",
+    }
+
+    # Off the event loop (image downloads block) so the worker stays responsive.
+    output = await run_in_threadpool(generate_anpr_sessions_pdf, meta, summary, rows)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return StreamingResponse(
         output,

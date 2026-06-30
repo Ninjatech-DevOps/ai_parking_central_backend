@@ -218,21 +218,43 @@ async def export_scans_pdf(
         0, 5000, location_id, scoped_ids, start, end, iv
     )
 
-    records = []
+    # Occupancy records (one row per scan). Use the clean frame for thumbnails.
+    rows = []
     for s in items:
-        records.append({
-            # Combined Date & Time
-            "datetime": f"{_fmt_date(s.recorded_at)}, {_fmt_time(s.recorded_at)}",
-            "location": s.location.name if s.location else "-",
-            "camera": s.camera.position_label if s.camera else "-",
-            "image_url": s.image_url or "",
-            "car": {"o": s.car_occupied, "a": s.car_available, "t": s.car_total},
-            "tw": {"o": s.two_wheeler_occupied, "a": s.two_wheeler_available, "t": s.two_wheeler_total},
+        rows.append({
+            "snapshot_url": _clean_frame_url(s.image_url),
+            "date": _fmt_date(s.recorded_at),
+            "time": _fmt_time(s.recorded_at),
+            "occ_car": s.car_occupied,
+            "avl_car": s.car_available,
+            "occ_bike": s.two_wheeler_occupied,
+            "avl_bike": s.two_wheeler_available,
         })
+
+    # Summary = the latest snapshot in range (most recent recorded_at).
+    latest = max(items, key=lambda s: s.recorded_at) if items else None
+    summary = {
+        "car": {
+            "total": latest.car_total if latest else 0,
+            "occupied": latest.car_occupied if latest else 0,
+            "available": latest.car_available if latest else 0,
+        },
+        "bike": {
+            "total": latest.two_wheeler_total if latest else 0,
+            "occupied": latest.two_wheeler_occupied if latest else 0,
+            "available": latest.two_wheeler_available if latest else 0,
+        },
+    }
+    location_name = (latest.location.name if (latest and latest.location) else None) or "All locations"
+    meta = {
+        "title": "Parking Occupancy Report",
+        "location": location_name,
+        "status": f"Updated {_fmt_date(latest.recorded_at)}, {_fmt_time(latest.recorded_at)}" if latest else "No data",
+    }
 
     # Run PDF generation (which downloads images, blocking) off the event loop
     # so the single-worker server stays responsive (login, etc.) during export.
-    output = await run_in_threadpool(generate_parking_history_pdf, records, "AI Parking History Report")
+    output = await run_in_threadpool(generate_parking_history_pdf, meta, summary, rows)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return StreamingResponse(
         output,
