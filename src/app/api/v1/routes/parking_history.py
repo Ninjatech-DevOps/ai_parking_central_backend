@@ -111,6 +111,48 @@ async def _resolve_scope(area_id, user_location_ids, db):
     return (user_location_ids & area_loc_ids) if user_location_ids is not None else area_loc_ids
 
 
+@router.get("/occupancy-summary")
+async def get_occupancy_summary(
+    area_id: Optional[uuid.UUID] = Query(None),
+    location_id: Optional[uuid.UUID] = Query(None),
+    service: ParkingScanService = Depends(_get_service),
+    _: bool = Depends(PermissionChecker(Permission.REPORTS_VIEW)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
+    db: AsyncSession = Depends(get_db),
+):
+    """Current occupancy summary cards for the AI Parking History page.
+
+    Same logic as the parking PDF: take each location's latest scan, then sum
+    across scope. Single location -> that location's last entry; all -> sum of
+    every location's last entry. Honors the page's Area / Location filters.
+    """
+    if location_id:
+        verify_location_in_scope(location_id, user_location_ids)
+    scoped_ids = await _resolve_scope(area_id, user_location_ids, db)
+
+    summary = await service.current_occupancy_summary(location_id, scoped_ids)
+    car = summary["car"]
+    bike = summary["bike"]
+    recorded_at = summary.get("latest_recorded_at")
+
+    location_name = "All locations"
+    if location_id:
+        loc = await db.execute(select(LocationModel.name).where(LocationModel.id == location_id))
+        location_name = loc.scalar_one_or_none() or "All locations"
+
+    return {
+        "location_name": location_name,
+        "location_count": summary["location_count"],
+        "car_total": car["total"],
+        "car_occupied": car["occupied"],
+        "car_available": car["available"],
+        "two_wheeler_total": bike["total"],
+        "two_wheeler_occupied": bike["occupied"],
+        "two_wheeler_available": bike["available"],
+        "updated_at": (recorded_at + IST).strftime("%d %b %Y, %I:%M %p") if recorded_at else None,
+    }
+
+
 @router.get("/export-csv")
 async def export_scans_csv(
     area_id: Optional[uuid.UUID] = Query(None),
