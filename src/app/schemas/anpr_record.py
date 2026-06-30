@@ -22,6 +22,12 @@ class AnprRecordCreate(BaseSchema):
     recorded_at: Optional[datetime] = None
 
 
+class AnprRecordUpdate(BaseSchema):
+    number_plate: Optional[str] = None
+    vehicle_type: Optional[VehicleType] = None
+    direction: Optional[AnprDirection] = None
+
+
 class AnprRecordResponse(BaseSchema):
     id: uuid.UUID
     device_id: uuid.UUID

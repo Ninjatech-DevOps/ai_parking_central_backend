@@ -43,6 +43,9 @@ class AnprRecordService:
             location_id, location_ids, number_plate, vehicle_type, direction, start_date, end_date
         )
 
+    async def update(self, id: uuid.UUID, data: Dict[str, Any]):
+        return await self.repo.update(id, data)
+
     async def search_plates(
         self,
         query_str: str,

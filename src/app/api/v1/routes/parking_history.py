@@ -41,7 +41,15 @@ def _fmt_date(dt: datetime) -> str:
 
 
 def _fmt_time(dt: datetime) -> str:
-    return (dt + IST).strftime("%I:%M %p")
+    ist_dt = dt + IST
+    # Round to nearest 5 minutes
+    minute = ist_dt.minute
+    rounded = ((minute + 2) // 5) * 5
+    if rounded == 60:
+        ist_dt = ist_dt.replace(minute=0) + timedelta(hours=1)
+    else:
+        ist_dt = ist_dt.replace(minute=rounded)
+    return ist_dt.strftime("%I:%M %p")
 
 
 def _clean_frame_url(url: Optional[str]) -> str:

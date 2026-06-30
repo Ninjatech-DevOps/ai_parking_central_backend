@@ -17,7 +17,7 @@ from src.app.models.location import Location
 from src.app.repositories.anpr_session import AnprSessionRepository
 from src.app.repositories.parking_scan import ParkingScanRepository
 from src.app.services.parking_scan import ParkingScanService
-from src.app.schemas.anpr_session import AnprSessionResponse
+from src.app.schemas.anpr_session import AnprSessionResponse, AnprSessionUpdate
 from src.app.schemas.base import MessageResponse, PaginatedResponse
 from src.app.services.anpr_session import AnprSessionService
 from src.app.utils.export import generate_excel, generate_anpr_sessions_pdf
@@ -87,6 +87,24 @@ async def list_sessions(
         response_items.append(resp)
 
     return build_paginated_response(response_items, total, page, limit)
+
+
+@router.patch("/{session_id}", response_model=AnprSessionResponse)
+async def update_session(
+    session_id: uuid.UUID,
+    body: AnprSessionUpdate,
+    service: AnprSessionService = Depends(_get_service),
+    _: bool = Depends(PermissionChecker(Permission.ANPR_CONFIGURE)),
+):
+    session = await service.update(session_id, body.model_dump(exclude_unset=True))
+    if not session:
+        from src.app.exceptions.base import NotFoundException
+        raise NotFoundException(detail="Session not found")
+    resp = AnprSessionResponse.model_validate(session)
+    resp.duration_display = AnprSessionService.format_duration(session.entry_time, session.exit_time)
+    if session.location:
+        resp.location_name = session.location.name
+    return resp
 
 
 @router.get("/export-csv")

@@ -10,6 +10,9 @@ class AnprSessionService:
     def __init__(self, repo: AnprSessionRepository):
         self.repo = repo
 
+    async def update(self, id: uuid.UUID, data: Dict[str, Any]):
+        return await self.repo.update(id, data)
+
     async def get_filtered(
         self,
         skip: int = 0,
