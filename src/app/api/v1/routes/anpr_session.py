@@ -7,16 +7,15 @@ from typing import Optional, Set
 from fastapi import APIRouter, Depends, Query
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select as sa_select
+from sqlalchemy import select as sa_select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.api.deps import PermissionChecker, get_user_location_ids, verify_location_in_scope
 from src.app.core.constants import Permission
 from src.app.db.session import get_db
 from src.app.models.location import Location
+from src.app.models.anpr_session import AnprSession
 from src.app.repositories.anpr_session import AnprSessionRepository
-from src.app.repositories.parking_scan import ParkingScanRepository
-from src.app.services.parking_scan import ParkingScanService
 from src.app.schemas.anpr_session import AnprSessionResponse
 from src.app.schemas.base import MessageResponse, PaginatedResponse
 from src.app.services.anpr_session import AnprSessionService
@@ -33,6 +32,45 @@ def _ev(v) -> str:
 
 def _get_service(db: AsyncSession = Depends(get_db)) -> AnprSessionService:
     return AnprSessionService(AnprSessionRepository(db))
+
+
+async def _anpr_occupancy_summary(db, location_id, user_location_ids) -> dict:
+    """Live occupancy via the config-slots model (same as anpr-dashboard):
+      Total     = configured location slots (locations.total_*_slots)
+      Occupied  = vehicles currently inside = active ANPR sessions (IN - OUT)
+      Available = max(0, Total - Occupied)
+    Single location -> that location; all -> summed across the scope.
+    """
+    loc_q = sa_select(
+        func.coalesce(func.sum(Location.total_car_slots), 0),
+        func.coalesce(func.sum(Location.total_two_wheeler_slots), 0),
+    ).where(Location.is_active.is_(True))
+    if location_id:
+        loc_q = loc_q.where(Location.id == location_id)
+    elif user_location_ids is not None:
+        loc_q = loc_q.where(Location.id.in_(user_location_ids))
+    car_total, bike_total = (await db.execute(loc_q)).one()
+
+    sess_q = (
+        sa_select(AnprSession.vehicle_type, func.count())
+        .where(AnprSession.is_active.is_(True))
+        .group_by(AnprSession.vehicle_type)
+    )
+    if location_id:
+        sess_q = sess_q.where(AnprSession.location_id == location_id)
+    elif user_location_ids is not None:
+        sess_q = sess_q.where(AnprSession.location_id.in_(user_location_ids))
+    car_occ = bike_occ = 0
+    for vtype, count in (await db.execute(sess_q)).all():
+        if _ev(vtype) == "CAR":
+            car_occ = count
+        elif _ev(vtype) == "TWO_WHEELER":
+            bike_occ = count
+
+    return {
+        "car": {"total": car_total, "occupied": car_occ, "available": max(0, car_total - car_occ)},
+        "bike": {"total": bike_total, "occupied": bike_occ, "available": max(0, bike_total - bike_occ)},
+    }
 
 
 def _parse_date(date_str: Optional[str]) -> Optional[datetime]:
@@ -217,28 +255,17 @@ async def export_sessions_pdf(
             "status": "Inside" if s.is_active else "Exited",
         })
 
-    # Summary cards = TODAY's live parking occupancy (latest scan per location,
-    # summed) — independent of the ANPR date range. Single location -> that lot;
-    # all locations -> sum. Stale lots (no scan today) are excluded.
-    today_ist_midnight = (datetime.utcnow() + ist).replace(hour=0, minute=0, second=0, microsecond=0)
-    since_utc = today_ist_midnight - ist
-    parking_service = ParkingScanService(ParkingScanRepository(db))
-    occ = await parking_service.current_occupancy_summary(location_id, user_location_ids, since=since_utc)
-    summary = {"car": occ["car"], "bike": occ["bike"]}
+    # Summary cards = live ANPR occupancy (config-slots model), independent of
+    # the date range: Total = configured location slots, Occupied = vehicles
+    # currently inside (active sessions = IN - OUT), Available = Total - Occupied.
+    summary = await _anpr_occupancy_summary(db, location_id, user_location_ids)
 
     location_name = "All locations"
     if location_id:
         res = await db.execute(sa_select(Location.name).where(Location.id == location_id))
         location_name = res.scalar_one_or_none() or "All locations"
 
-    occ_dt = occ.get("latest_recorded_at")
-    latest = max(items, key=lambda s: s.entry_time) if items else None
-    if occ_dt:
-        status = f"Updated {(occ_dt + ist).strftime('%d %b %Y, %I:%M %p')}"
-    elif latest:
-        status = f"Updated {(latest.entry_time + ist).strftime('%d %b %Y, %I:%M %p')}"
-    else:
-        status = "No data"
+    status = f"Updated {(datetime.utcnow() + ist).strftime('%d %b %Y, %I:%M %p')}"
     meta = {
         "title": "ANPR Sessions Report",
         "location": location_name,
