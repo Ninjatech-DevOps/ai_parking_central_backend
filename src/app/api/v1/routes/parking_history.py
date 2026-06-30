@@ -291,6 +291,9 @@ async def export_scans_pdf(
         "title": "Parking Occupancy Report",
         "location": location_name,
         "status": f"Updated {_fmt_date(recorded_at)}, {_fmt_time(recorded_at)}" if recorded_at else "No data",
+        # Location column only makes sense across multiple locations; for a single
+        # selected location it's redundant (already shown in the subtitle).
+        "show_location": location_id is None,
     }
 
     # Run PDF generation (which downloads images, blocking) off the event loop

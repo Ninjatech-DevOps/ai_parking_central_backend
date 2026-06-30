@@ -209,6 +209,11 @@ class ParkingPDF(FPDF):
         self.report_title = title
 
     def header(self):
+        # Title only on the first page; continuation pages just carry the table
+        # (a small top margin, no repeated title).
+        if self.page_no() > 1:
+            self.set_y(12)
+            return
         # Clean header — dark title on white (no teal banner). The green status
         # pill drawn by the report body carries the "Updated …" timestamp.
         self.set_font("Helvetica", "B", 15)
@@ -1346,13 +1351,23 @@ def _table_frame(pdf, M, W, y0, y1, radius=2):
         pdf.rect(M, y0, W, y1 - y0, "D")
 
 
-def _records_table(pdf, rows, top=24):
-    """Occupancy-records table with a snapshot thumbnail column (reference UI)."""
+def _records_table(pdf, rows, top=14, show_location=True):
+    """Occupancy-records table with a snapshot thumbnail column (reference UI).
+
+    show_location: include the Location column (for the All-locations report).
+    When a single location is selected it's redundant (shown in the subtitle),
+    so it's dropped and the freed width goes to the other columns.
+    """
     M = 10
     W = pdf.w - 2 * M
-    headers = ["Snapshot", "Location", "Date & Time", "Car Occ", "Car Avail", "Car Total", "2W Occ", "2W Avail", "2W Total"]
-    widths = [20, 34, 26, 18, 18, 18, 18, 19, 19]   # sum = 190
-    aligns = ["L", "L", "L", "R", "R", "R", "R", "R", "R"]
+    if show_location:
+        headers = ["Snapshot", "Location", "Date & Time", "Car Occ", "Car Avail", "Car Total", "2W Occ", "2W Avail", "2W Total"]
+        widths = [20, 34, 26, 18, 18, 18, 18, 19, 19]   # sum = 190
+        aligns = ["L", "L", "L", "R", "R", "R", "R", "R", "R"]
+    else:
+        headers = ["Snapshot", "Date & Time", "Car Occ", "Car Avail", "Car Total", "2W Occ", "2W Avail", "2W Total"]
+        widths = [20, 30, 23, 23, 23, 23, 24, 24]   # sum = 190
+        aligns = ["L", "L", "R", "R", "R", "R", "R", "R"]
     row_h = 15
 
     def draw_header():
@@ -1408,22 +1423,27 @@ def _records_table(pdf, rows, top=24):
         if not drawn:
             pdf._draw_image_placeholder(tx, ty, tw, th)
 
-        # Location — wrapped (up to 3 lines) so long names aren't cut.
         cx = M + widths[0]
-        loc_w = widths[1]
-        loc_lines = pdf._wrap_text(r.get("location", "") or "-", loc_w - 5, 7.5, "")[:3]
-        lh = 3.8
-        ly = ry + (row_h - len(loc_lines) * lh) / 2
-        for ln in loc_lines:
-            _txt(pdf, cx + 3, ly, loc_w - 4, ln, size=7.5, style="", color=SLATE_700, align="L", h=lh)
-            ly += lh
-        cx += loc_w
+        wi = 1  # index into widths after the snapshot column
+
+        # Location (only for the All-locations report) — wrapped up to 3 lines.
+        if show_location:
+            loc_w = widths[wi]
+            loc_lines = pdf._wrap_text(r.get("location", "") or "-", loc_w - 5, 7.5, "")[:3]
+            lh = 3.8
+            ly = ry + (row_h - len(loc_lines) * lh) / 2
+            for ln in loc_lines:
+                _txt(pdf, cx + 3, ly, loc_w - 4, ln, size=7.5, style="", color=SLATE_700, align="L", h=lh)
+                ly += lh
+            cx += loc_w
+            wi += 1
 
         # Date & Time — stacked on two lines so neither value is ever truncated.
-        dt_w = widths[2]
+        dt_w = widths[wi]
         _txt(pdf, cx + 3, ry + 3.4, dt_w - 4, r.get("date", ""), size=9, style="B", color=SLATE_700, align="L", h=4)
         _txt(pdf, cx + 3, ry + 8.4, dt_w - 4, r.get("time", ""), size=8, style="", color=SLATE_500, align="L", h=4)
         cx += dt_w
+        wi += 1
 
         # Numeric columns (Occ=red, Avl=green, Total=dark), right-aligned.
         vmid = ry + row_h / 2 - 2
@@ -1436,7 +1456,7 @@ def _records_table(pdf, rows, top=24):
             (r.get("tot_bike", 0), SLATE_900),
         ]
         for i, (val, color) in enumerate(nums):
-            wcol = widths[3 + i]
+            wcol = widths[wi + i]
             _txt(pdf, cx, vmid, wcol - 4, str(val), size=9, style="B", color=color, align="R", h=4)
             cx += wcol
         pdf.set_y(ry + row_h)
@@ -1483,7 +1503,7 @@ def generate_parking_history_pdf(meta: dict, summary: dict, rows: list) -> io.By
 
         _txt(pdf, M, y, W, f"Occupancy records ({len(rows)})", size=10, style="B", color=SLATE_900, h=5)
         pdf.set_y(y + 6)
-        _records_table(pdf, rows)
+        _records_table(pdf, rows, show_location=meta.get("show_location", True))
 
         output = io.BytesIO()
         pdf.output(output)
@@ -1493,7 +1513,7 @@ def generate_parking_history_pdf(meta: dict, summary: dict, rows: list) -> io.By
         _cleanup_image_cache()
 
 
-def _thumb_table(pdf, columns, rows, top=26):
+def _thumb_table(pdf, columns, rows, top=14):
     """Generic records table with a snapshot-thumbnail first column.
 
     columns: [{header, width, key, align, color}]. The column whose key is
