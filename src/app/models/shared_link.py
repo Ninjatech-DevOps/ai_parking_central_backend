@@ -36,5 +36,6 @@ class SharedLink(Base, UUIDMixin, TimestampMixin):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     view_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    view_config: Mapped[str] = mapped_column(Text, nullable=True)
 
     created_by = relationship("User", lazy="selectin")
