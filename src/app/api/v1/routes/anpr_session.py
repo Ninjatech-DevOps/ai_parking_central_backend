@@ -138,6 +138,10 @@ async def update_session(
     if not session:
         from src.app.exceptions.base import NotFoundException
         raise NotFoundException(detail="Session not found")
+    # Commit so the updated times are persisted, then refresh to get clean state
+    db = service.repo.db
+    await db.commit()
+    await db.refresh(session)
     resp = AnprSessionResponse.model_validate(session)
     resp.duration_display = AnprSessionService.format_duration(session.entry_time, session.exit_time)
     if session.location:
