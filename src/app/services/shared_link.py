@@ -41,6 +41,13 @@ class SharedLinkService:
                 raise BadRequestException(detail="scope_id required for non-CAMERA scope")
             data.pop("camera_ids", None)
 
+        if "view_config" in data and data["view_config"] is not None:
+            vc = data["view_config"]
+            if isinstance(vc, dict):
+                data["view_config"] = json.dumps(vc)
+            else:
+                data["view_config"] = json.dumps(vc.dict() if hasattr(vc, "dict") else vc)
+
         data["created_by_user_id"] = user_id
         return await self.shared_link_repo.create(data)
 
@@ -74,6 +81,12 @@ class SharedLinkService:
         link = await self.shared_link_repo.get_by_id(link_id)
         if not link:
             raise NotFoundException(detail="Shared link not found")
+        if "view_config" in data and data["view_config"] is not None:
+            vc = data["view_config"]
+            if isinstance(vc, dict):
+                data["view_config"] = json.dumps(vc)
+            else:
+                data["view_config"] = json.dumps(vc.dict() if hasattr(vc, "dict") else vc)
         return await self.shared_link_repo.update(link_id, data)
 
     async def delete(self, link_id: uuid.UUID) -> bool:
@@ -81,6 +94,34 @@ class SharedLinkService:
         if not link:
             raise NotFoundException(detail="Shared link not found")
         return await self.shared_link_repo.delete(link_id)
+
+    async def validate_public_link(self, token: str, required_page: Optional[str] = None):
+        """Validate a public link token and optionally check page access.
+
+        Returns the link object if valid. Raises NotFoundException otherwise.
+        """
+        link = await self.shared_link_repo.get_by_token(token)
+        if not link or not link.is_active:
+            raise NotFoundException(detail="Link not found or inactive")
+
+        if link.expires_at and link.expires_at < datetime.now(timezone.utc):
+            raise NotFoundException(detail="Link has expired")
+
+        if required_page:
+            view_config = self._parse_view_config(link)
+            pages = view_config.get("pages", []) if view_config else []
+            if pages and required_page not in pages:
+                raise NotFoundException(detail="Page not available on this link")
+
+        return link
+
+    def _parse_view_config(self, link) -> Optional[Dict]:
+        if not link.view_config:
+            return None
+        try:
+            return json.loads(link.view_config)
+        except (json.JSONDecodeError, ValueError):
+            return None
 
     async def resolve_public_view(self, token: str) -> Dict[str, Any]:
         link = await self.shared_link_repo.get_by_token(token)
@@ -122,6 +163,7 @@ class SharedLinkService:
         return {
             "name": link.name,
             "scope_type": link.scope_type,
+            "view_config": self._parse_view_config(link),
             "locations": locations_data,
             "total_summary": total_summary,
         }

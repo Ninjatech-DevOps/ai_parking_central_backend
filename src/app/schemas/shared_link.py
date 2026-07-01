@@ -1,6 +1,9 @@
+import json
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+
+from pydantic import field_validator
 
 from src.app.core.constants import SharedLinkScopeType
 from src.app.schemas.base import BaseSchema, BaseResponse
@@ -39,6 +42,16 @@ class SharedLinkResponse(BaseResponse):
     is_active: bool
     view_count: int
     view_config: Optional[Dict[str, Any]] = None
+
+    @field_validator("view_config", mode="before")
+    @classmethod
+    def parse_view_config(cls, v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, ValueError):
+                return None
+        return v
 
 
 class PublicLocationData(BaseSchema):
