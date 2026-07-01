@@ -36,6 +36,15 @@ class SharedLinkService:
                 raise BadRequestException(detail="camera_ids required for CAMERA scope")
             data["camera_ids"] = json.dumps([str(cid) for cid in data["camera_ids"]])
             data["scope_id"] = None
+        elif scope_type == SharedLinkScopeType.LOCATION:
+            # Multi-location: location IDs come in camera_ids field
+            if data.get("camera_ids"):
+                data["camera_ids"] = json.dumps([str(lid) for lid in data["camera_ids"]])
+                data["scope_id"] = None
+            elif data.get("scope_id"):
+                data.pop("camera_ids", None)
+            else:
+                raise BadRequestException(detail="camera_ids (location_ids) or scope_id required for LOCATION scope")
         else:
             if not data.get("scope_id"):
                 raise BadRequestException(detail="scope_id required for non-CAMERA scope")
@@ -183,7 +192,17 @@ class SharedLinkService:
             return list(location_ids)
 
         if scope_type == SharedLinkScopeType.LOCATION:
-            return [link.scope_id]
+            # Multi-location: location IDs stored in camera_ids field as JSON
+            if link.camera_ids:
+                try:
+                    ids = json.loads(link.camera_ids)
+                    return [uuid.UUID(lid) for lid in ids]
+                except (json.JSONDecodeError, ValueError):
+                    pass
+            # Single location fallback
+            if link.scope_id:
+                return [link.scope_id]
+            return []
 
         filter_key = {
             SharedLinkScopeType.AREA: "area_id",
