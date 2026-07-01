@@ -221,7 +221,11 @@ async def get_public_anpr_dashboard(
     service: SharedLinkService = Depends(get_shared_link_service),
     db: AsyncSession = Depends(get_db),
 ):
-    link = await service.validate_public_link(token, required_page="dashboard_anpr")
+    # Allow access from both dashboard_anpr and anpr_history pages
+    try:
+        link = await service.validate_public_link(token, required_page="dashboard_anpr")
+    except Exception:
+        link = await service.validate_public_link(token, required_page="anpr_history")
     location_ids = await service._resolve_location_ids(link)
     location_id_set = set(location_ids) if location_ids else None
 
