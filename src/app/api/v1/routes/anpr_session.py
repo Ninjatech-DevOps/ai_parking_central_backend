@@ -152,7 +152,11 @@ async def update_session(
     service: AnprSessionService = Depends(_get_service),
     _: bool = Depends(PermissionChecker(Permission.ANPR_CONFIGURE)),
 ):
-    session = await service.update(session_id, body.model_dump(exclude_unset=True))
+    data = body.model_dump(exclude_unset=True)
+    # Auto-set is_active based on exit_time: has exit = completed, no exit = active
+    if "exit_time" in data:
+        data["is_active"] = data["exit_time"] is None
+    session = await service.update(session_id, data)
     if not session:
         from src.app.exceptions.base import NotFoundException
         raise NotFoundException(detail="Session not found")
