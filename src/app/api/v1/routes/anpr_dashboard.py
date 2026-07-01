@@ -35,11 +35,14 @@ async def get_dashboard_summary(
         area_loc_ids = {row[0] for row in result.all()}
         scoped_ids = (scoped_ids & area_loc_ids) if scoped_ids is not None else area_loc_ids
 
-    # Get location totals
+    # Get location totals — only ANPR locations (those with configured car/2w slots)
     loc_q = select(
         func.coalesce(func.sum(Location.total_car_slots), 0).label("car_total"),
         func.coalesce(func.sum(Location.total_two_wheeler_slots), 0).label("tw_total"),
-    ).where(Location.is_active == True)
+    ).where(
+        Location.is_active == True,
+        (Location.total_car_slots > 0) | (Location.total_two_wheeler_slots > 0),
+    )
     if location_id:
         loc_q = loc_q.where(Location.id == location_id)
     elif scoped_ids is not None:
@@ -104,8 +107,11 @@ async def get_dashboard_locations(
     if location_id:
         verify_location_in_scope(location_id, user_location_ids)
 
-    # Get all locations in scope
-    loc_q = select(Location).where(Location.is_active == True)
+    # Get only ANPR locations (those with configured car/2w slots)
+    loc_q = select(Location).where(
+        Location.is_active == True,
+        (Location.total_car_slots > 0) | (Location.total_two_wheeler_slots > 0),
+    )
     if location_id:
         loc_q = loc_q.where(Location.id == location_id)
     elif area_id:
