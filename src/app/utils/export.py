@@ -1287,11 +1287,16 @@ def generate_anpr_sessions_pdf_legacy(items: list, title: str = "ANPR Sessions R
 # ─────────────────────────────────────────────────────────────────────────────
 def _occ_tile(pdf, x, y, w, h, label, value, kind="neutral"):
     """Flat summary tile (reference UI): soft tinted card, small label on top,
-    big value below. kind: neutral (grey) / occupied (red) / available (green)."""
+    big value below. kind: neutral (grey) / occupied (red) / available (green)
+    / in (blue) / out (amber)."""
     if kind == "occupied":
         bg, lcol, vcol = _tint(RED, 0.93), RED, RED
     elif kind == "available":
         bg, lcol, vcol = _tint(EMERALD, 0.93), EMERALD, EMERALD
+    elif kind == "in":
+        bg, lcol, vcol = _tint(BLUE, 0.93), BLUE, BLUE
+    elif kind == "out":
+        bg, lcol, vcol = _tint(AMBER, 0.93), AMBER, AMBER
     else:
         bg, lcol, vcol = SLATE_50, SLATE_500, SLATE_900
 
@@ -1624,7 +1629,7 @@ def generate_anpr_sessions_pdf(meta: dict, summary: dict, rows: list) -> io.Byte
     vehicle type) + the ANPR sessions records table.
 
     meta: {title, location, status}
-    summary: {car:{total,occupied,available}, bike:{total,occupied,available}}
+    summary: {car:{total,in,out,available}, bike:{total,in,out,available}}
     rows: [{snapshot_url, plate, type, date, in, out, duration, status}]
     """
     try:
@@ -1639,22 +1644,24 @@ def generate_anpr_sessions_pdf(meta: dict, summary: dict, rows: list) -> io.Byte
 
         car = summary.get("car", {})
         bike = summary.get("bike", {})
-        tw = (W - 2 * 6) / 3
+        tw = (W - 3 * 6) / 4   # four tiles per row: Total / In / Out / Available
         th = 24
+
+        def tile_row(vals, total_label):
+            _occ_tile(pdf, M, y, tw, th, total_label, vals.get("total", 0), "neutral")
+            _occ_tile(pdf, M + (tw + 6), y, tw, th, "In", vals.get("in", 0), "in")
+            _occ_tile(pdf, M + 2 * (tw + 6), y, tw, th, "Out", vals.get("out", 0), "out")
+            _occ_tile(pdf, M + 3 * (tw + 6), y, tw, th, "Available", vals.get("available", 0), "available")
 
         y = 25
         _txt(pdf, M, y, W, "Cars", size=10, style="B", color=SLATE_900, h=5)
         y += 7
-        _occ_tile(pdf, M, y, tw, th, "Total cars", car.get("total", 0), "neutral")
-        _occ_tile(pdf, M + tw + 6, y, tw, th, "Occupied", car.get("occupied", 0), "occupied")
-        _occ_tile(pdf, M + 2 * (tw + 6), y, tw, th, "Available", car.get("available", 0), "available")
+        tile_row(car, "Total cars")
         y += th + 6
 
         _txt(pdf, M, y, W, "Two Wheeler", size=10, style="B", color=SLATE_900, h=5)
         y += 7
-        _occ_tile(pdf, M, y, tw, th, "Total bikes", bike.get("total", 0), "neutral")
-        _occ_tile(pdf, M + tw + 6, y, tw, th, "Occupied", bike.get("occupied", 0), "occupied")
-        _occ_tile(pdf, M + 2 * (tw + 6), y, tw, th, "Available", bike.get("available", 0), "available")
+        tile_row(bike, "Total bikes")
         y += th + 7
 
         _txt(pdf, M, y, W, f"Session records ({len(rows)})", size=10, style="B", color=SLATE_900, h=5)
@@ -1667,7 +1674,7 @@ def generate_anpr_sessions_pdf(meta: dict, summary: dict, rows: list) -> io.Byte
                 {"header": "Location", "width": 27, "key": "location", "align": "L", "wrap": True},
                 {"header": "Plate", "width": 25, "key": "plate", "align": "L", "color": SLATE_900},
                 {"header": "Type", "width": 26, "key": "type", "align": "L"},
-                {"header": "Date & Time", "width": 24, "key": "date", "align": "L", "stack": ("date", "in")},
+                {"header": "In", "width": 24, "key": "date", "align": "L", "stack": ("date", "in")},
                 {"header": "Out", "width": 24, "key": "out_date", "align": "L", "stack": ("out_date", "out_time")},
                 {"header": "Duration", "width": 22, "key": "duration", "align": "C"},
                 {"header": "Status", "width": 22, "key": "status", "align": "C", "color": "status"},
@@ -1679,7 +1686,7 @@ def generate_anpr_sessions_pdf(meta: dict, summary: dict, rows: list) -> io.Byte
                 {"header": "Snapshot", "width": 26, "key": "snapshot_url", "align": "L"},
                 {"header": "Plate", "width": 28, "key": "plate", "align": "L", "color": SLATE_900},
                 {"header": "Type", "width": 30, "key": "type", "align": "L"},
-                {"header": "Date & Time", "width": 28, "key": "date", "align": "L", "stack": ("date", "in")},
+                {"header": "In", "width": 28, "key": "date", "align": "L", "stack": ("date", "in")},
                 {"header": "Out", "width": 28, "key": "out_date", "align": "L", "stack": ("out_date", "out_time")},
                 {"header": "Duration", "width": 26, "key": "duration", "align": "C"},
                 {"header": "Status", "width": 24, "key": "status", "align": "C", "color": "status"},

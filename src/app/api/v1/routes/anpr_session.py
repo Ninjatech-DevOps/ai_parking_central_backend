@@ -34,42 +34,61 @@ def _get_service(db: AsyncSession = Depends(get_db)) -> AnprSessionService:
     return AnprSessionService(AnprSessionRepository(db))
 
 
-async def _anpr_occupancy_summary(db, location_id, user_location_ids) -> dict:
-    """Live occupancy via the config-slots model (same as anpr-dashboard):
+async def _anpr_occupancy_summary(db, location_id, user_location_ids, start=None, end=None) -> dict:
+    """Occupancy cards for the ANPR PDF (Total / In / Out / Available).
+    Of the vehicles that ENTERED in the window:
       Total     = configured location slots (locations.total_*_slots)
-      Occupied  = vehicles currently inside = active ANPR sessions (IN - OUT)
-      Available = max(0, Total - Occupied)
+      In        = still parked (entered in window, no out time yet)
+      Out       = have exited (entered in window, has an out time)
+      Available = max(0, Total - In)
     Single location -> that location; all -> summed across the scope.
+    Default window (no range chosen) = today 00:00 -> now (IST).
     """
-    loc_q = sa_select(
+    ist = timedelta(hours=5, minutes=30)
+    if start is None:
+        start = (datetime.utcnow() + ist).replace(hour=0, minute=0, second=0, microsecond=0) - ist
+    if end is None:
+        end = datetime.utcnow()
+
+    def _scope(q, col):
+        if location_id:
+            return q.where(col == location_id)
+        if user_location_ids is not None:
+            return q.where(col.in_(user_location_ids))
+        return q
+
+    async def _counts(q):
+        car = bike = 0
+        for vtype, count in (await db.execute(q)).all():
+            if _ev(vtype) == "CAR":
+                car = count
+            elif _ev(vtype) == "TWO_WHEELER":
+                bike = count
+        return car, bike
+
+    # Total — configured capacity per vehicle type.
+    loc_q = _scope(sa_select(
         func.coalesce(func.sum(Location.total_car_slots), 0),
         func.coalesce(func.sum(Location.total_two_wheeler_slots), 0),
-    ).where(Location.is_active.is_(True))
-    if location_id:
-        loc_q = loc_q.where(Location.id == location_id)
-    elif user_location_ids is not None:
-        loc_q = loc_q.where(Location.id.in_(user_location_ids))
+    ).where(Location.is_active.is_(True)), Location.id)
     car_total, bike_total = (await db.execute(loc_q)).one()
 
-    sess_q = (
+    # Of the vehicles that ENTERED in the window:
+    #   In  = still parked (no out time yet)   Out = have exited (has out time)
+    car_in, bike_in = await _counts(_scope(
         sa_select(AnprSession.vehicle_type, func.count())
-        .where(AnprSession.is_active.is_(True))
-        .group_by(AnprSession.vehicle_type)
-    )
-    if location_id:
-        sess_q = sess_q.where(AnprSession.location_id == location_id)
-    elif user_location_ids is not None:
-        sess_q = sess_q.where(AnprSession.location_id.in_(user_location_ids))
-    car_occ = bike_occ = 0
-    for vtype, count in (await db.execute(sess_q)).all():
-        if _ev(vtype) == "CAR":
-            car_occ = count
-        elif _ev(vtype) == "TWO_WHEELER":
-            bike_occ = count
+        .where(AnprSession.entry_time >= start, AnprSession.entry_time <= end,
+               AnprSession.exit_time.is_(None))
+        .group_by(AnprSession.vehicle_type), AnprSession.location_id))
+    car_out, bike_out = await _counts(_scope(
+        sa_select(AnprSession.vehicle_type, func.count())
+        .where(AnprSession.entry_time >= start, AnprSession.entry_time <= end,
+               AnprSession.exit_time.is_not(None))
+        .group_by(AnprSession.vehicle_type), AnprSession.location_id))
 
     return {
-        "car": {"total": car_total, "occupied": car_occ, "available": max(0, car_total - car_occ)},
-        "bike": {"total": bike_total, "occupied": bike_occ, "available": max(0, bike_total - bike_occ)},
+        "car": {"total": car_total, "in": car_in, "out": car_out, "available": max(0, car_total - car_in)},
+        "bike": {"total": bike_total, "in": bike_in, "out": bike_out, "available": max(0, bike_total - bike_in)},
     }
 
 
@@ -278,10 +297,10 @@ async def export_sessions_pdf(
             "status": "Parked" if s.is_active else "Exited",
         })
 
-    # Summary cards = live ANPR occupancy (config-slots model), independent of
-    # the date range: Total = configured location slots, Occupied = vehicles
-    # currently inside (active sessions = IN - OUT), Available = Total - Occupied.
-    summary = await _anpr_occupancy_summary(db, location_id, user_location_ids)
+    # Summary cards: Total (config slots) / In (entries in window) / Out (exits
+    # in window) / Available (Total - currently inside). Window = the selected
+    # start/end, defaulting to today when none is chosen.
+    summary = await _anpr_occupancy_summary(db, location_id, user_location_ids, start, end)
 
     location_name = "All locations"
     if location_id:
