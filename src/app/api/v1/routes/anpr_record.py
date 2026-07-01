@@ -16,7 +16,7 @@ from src.app.db.session import get_db
 from src.app.models.location import Location
 from src.app.repositories.anpr_record import AnprRecordRepository
 from src.app.schemas.anpr_record import AnprRecordResponse, AnprRecordUpdate
-from src.app.schemas.base import PaginatedResponse
+from src.app.schemas.base import MessageResponse, PaginatedResponse
 from src.app.services.anpr_record import AnprRecordService
 from src.app.utils.export import generate_excel, generate_pdf_with_images
 from src.app.utils.pagination import build_paginated_response, get_pagination_params
@@ -97,6 +97,21 @@ async def list_records(
         response_items.append(resp)
 
     return build_paginated_response(response_items, total, page, limit)
+
+
+@router.delete("/{record_id}", response_model=MessageResponse)
+async def delete_record(
+    record_id: uuid.UUID,
+    service: AnprRecordService = Depends(_get_service),
+    _: bool = Depends(PermissionChecker(Permission.ANPR_CONFIGURE)),
+    db: AsyncSession = Depends(get_db),
+):
+    # Delete linked sessions first
+    from sqlalchemy import text
+    await db.execute(text("DELETE FROM anpr_sessions WHERE entry_record_id = :rid OR exit_record_id = :rid"), {"rid": str(record_id)})
+    await service.repo.delete(record_id)
+    await db.commit()
+    return MessageResponse(message="Record deleted")
 
 
 @router.patch("/{record_id}", response_model=AnprRecordResponse)
