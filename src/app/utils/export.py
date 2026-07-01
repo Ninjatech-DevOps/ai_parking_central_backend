@@ -1600,7 +1600,7 @@ def _thumb_table(pdf, columns, rows, top=14):
                 val = r.get(key, "")
                 color = c.get("color")
                 if color == "status":
-                    col = TEAL if str(val) in ("Inside", "Active", "Still Parked") else SLATE_700
+                    col = TEAL if str(val) in ("Parked", "Inside", "Active", "Still Parked") else SLATE_700
                 elif isinstance(color, tuple):
                     col = color
                 else:
@@ -1660,29 +1660,29 @@ def generate_anpr_sessions_pdf(meta: dict, summary: dict, rows: list) -> io.Byte
         _txt(pdf, M, y, W, f"Session records ({len(rows)})", size=10, style="B", color=SLATE_900, h=5)
         pdf.set_y(y + 6)
         if meta.get("show_location", False):
-            # All-locations report: add a Location column. Date+In are stacked
-            # into one "Date & Time" cell to make room (sum of widths = 190).
+            # All-locations report: add a Location column. Date & Time and Out
+            # are each stacked onto two lines (sum of widths = 190).
             columns = [
                 {"header": "Snapshot", "width": 20, "key": "snapshot_url", "align": "L"},
                 {"header": "Location", "width": 27, "key": "location", "align": "L", "wrap": True},
                 {"header": "Plate", "width": 25, "key": "plate", "align": "L", "color": SLATE_900},
                 {"header": "Type", "width": 26, "key": "type", "align": "L"},
                 {"header": "Date & Time", "width": 24, "key": "date", "align": "L", "stack": ("date", "in")},
-                {"header": "Out", "width": 24, "key": "out", "align": "L"},
+                {"header": "Out", "width": 24, "key": "out_date", "align": "L", "stack": ("out_date", "out_time")},
                 {"header": "Duration", "width": 22, "key": "duration", "align": "C"},
                 {"header": "Status", "width": 22, "key": "status", "align": "C", "color": "status"},
             ]
         else:
             # Single-location report: no Location column (it's in the subtitle).
+            # Date & Time and Out are stacked onto two lines so nothing is cut.
             columns = [
                 {"header": "Snapshot", "width": 26, "key": "snapshot_url", "align": "L"},
-                {"header": "Plate", "width": 26, "key": "plate", "align": "L", "color": SLATE_900},
-                {"header": "Type", "width": 28, "key": "type", "align": "L"},
-                {"header": "Date", "width": 24, "key": "date", "align": "L"},
-                {"header": "In", "width": 20, "key": "in", "align": "L"},
-                {"header": "Out", "width": 24, "key": "out", "align": "L"},
-                {"header": "Duration", "width": 20, "key": "duration", "align": "C"},
-                {"header": "Status", "width": 22, "key": "status", "align": "C", "color": "status"},
+                {"header": "Plate", "width": 28, "key": "plate", "align": "L", "color": SLATE_900},
+                {"header": "Type", "width": 30, "key": "type", "align": "L"},
+                {"header": "Date & Time", "width": 28, "key": "date", "align": "L", "stack": ("date", "in")},
+                {"header": "Out", "width": 28, "key": "out_date", "align": "L", "stack": ("out_date", "out_time")},
+                {"header": "Duration", "width": 26, "key": "duration", "align": "C"},
+                {"header": "Status", "width": 24, "key": "status", "align": "C", "color": "status"},
             ]
         _thumb_table(pdf, columns, rows)
 

@@ -268,9 +268,10 @@ async def export_sessions_pdf(
             "type": "Car" if is_car else "Two Wheeler",
             "date": (s.entry_time + ist).strftime("%d %b %Y"),
             "in": (s.entry_time + ist).strftime("%I:%M %p"),
-            "out": (s.exit_time + ist).strftime("%d %b, %I:%M %p") if s.exit_time else "Still Parked",
+            "out_date": (s.exit_time + ist).strftime("%d %b %Y") if s.exit_time else "Still Parked",
+            "out_time": (s.exit_time + ist).strftime("%I:%M %p") if s.exit_time else "",
             "duration": AnprSessionService.format_duration(s.entry_time, s.exit_time) or "Active",
-            "status": "Inside" if s.is_active else "Exited",
+            "status": "Parked" if s.is_active else "Exited",
         })
 
     # Summary cards = live ANPR occupancy (config-slots model), independent of
