@@ -35,12 +35,11 @@ def _get_service(db: AsyncSession = Depends(get_db)) -> AnprSessionService:
 
 
 async def _anpr_occupancy_summary(db, location_id, user_location_ids, start=None, end=None) -> dict:
-    """Occupancy cards for the ANPR PDF (Total / In / Out / Available).
-    Of the vehicles that ENTERED in the window:
+    """Occupancy cards for the ANPR PDF (Total / In / Out / Available):
       Total     = configured location slots (locations.total_*_slots)
-      In        = still parked (entered in window, no out time yet)
-      Out       = have exited (entered in window, has an out time)
-      Available = max(0, Total - In)
+      In        = entries in the window (all IN reads for that time)
+      Out       = of those entries, how many have exited (has an out time)
+      Available = max(0, Total - (In - Out))   (Total minus still-parked)
     Single location -> that location; all -> summed across the scope.
     Default window (no range chosen) = today 00:00 -> now (IST).
     """
@@ -73,12 +72,10 @@ async def _anpr_occupancy_summary(db, location_id, user_location_ids, start=None
     ).where(Location.is_active.is_(True)), Location.id)
     car_total, bike_total = (await db.execute(loc_q)).one()
 
-    # Of the vehicles that ENTERED in the window:
-    #   In  = still parked (no out time yet)   Out = have exited (has out time)
+    # In = all entries in the window; Out = of those, how many have exited.
     car_in, bike_in = await _counts(_scope(
         sa_select(AnprSession.vehicle_type, func.count())
-        .where(AnprSession.entry_time >= start, AnprSession.entry_time <= end,
-               AnprSession.exit_time.is_(None))
+        .where(AnprSession.entry_time >= start, AnprSession.entry_time <= end)
         .group_by(AnprSession.vehicle_type), AnprSession.location_id))
     car_out, bike_out = await _counts(_scope(
         sa_select(AnprSession.vehicle_type, func.count())
@@ -87,8 +84,10 @@ async def _anpr_occupancy_summary(db, location_id, user_location_ids, start=None
         .group_by(AnprSession.vehicle_type), AnprSession.location_id))
 
     return {
-        "car": {"total": car_total, "in": car_in, "out": car_out, "available": max(0, car_total - car_in)},
-        "bike": {"total": bike_total, "in": bike_in, "out": bike_out, "available": max(0, bike_total - bike_in)},
+        "car": {"total": car_total, "in": car_in, "out": car_out,
+                "available": max(0, car_total - (car_in - car_out))},
+        "bike": {"total": bike_total, "in": bike_in, "out": bike_out,
+                 "available": max(0, bike_total - (bike_in - bike_out))},
     }
 
 
