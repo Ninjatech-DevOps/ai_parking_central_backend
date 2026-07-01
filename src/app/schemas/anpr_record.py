@@ -26,6 +26,7 @@ class AnprRecordUpdate(BaseSchema):
     number_plate: Optional[str] = None
     vehicle_type: Optional[VehicleType] = None
     direction: Optional[AnprDirection] = None
+    recorded_at: Optional[datetime] = None
 
 
 class AnprRecordResponse(BaseSchema):

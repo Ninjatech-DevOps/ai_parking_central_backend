@@ -35,3 +35,4 @@ class ParkingScanUpdate(BaseSchema):
     two_wheeler_occupied: Optional[int] = None
     two_wheeler_available: Optional[int] = None
     two_wheeler_total: Optional[int] = None
+    recorded_at: Optional[datetime] = None

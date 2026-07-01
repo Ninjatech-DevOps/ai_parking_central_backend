@@ -9,6 +9,8 @@ from src.app.schemas.base import BaseSchema, BaseResponse
 class AnprSessionUpdate(BaseSchema):
     number_plate: Optional[str] = None
     vehicle_type: Optional[str] = None
+    entry_time: Optional[datetime] = None
+    exit_time: Optional[datetime] = None
 
 
 class AnprSessionResponse(BaseResponse):
