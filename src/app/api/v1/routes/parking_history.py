@@ -284,11 +284,17 @@ async def export_scans_pdf(
             "tot_bike": s.two_wheeler_total,
         })
 
-    # Summary cards = each location's latest scan, summed across scope.
-    # Single location -> that location's last entry; all -> sum of every
-    # location's latest entry (shared ParkingScanService.current_occupancy_summary).
-    summary = await service.current_occupancy_summary(location_id, scoped_ids)
-    recorded_at = summary.get("latest_recorded_at")
+    # Summary cards = latest scan in the filtered window (not live state).
+    if items:
+        latest = items[0]  # items sorted desc by recorded_at
+        summary = {
+            "car": {"total": latest.car_total, "occupied": latest.car_occupied, "available": latest.car_available},
+            "bike": {"total": latest.two_wheeler_total, "occupied": latest.two_wheeler_occupied, "available": latest.two_wheeler_available},
+        }
+        recorded_at = latest.recorded_at
+    else:
+        summary = {"car": {"total": 0, "occupied": 0, "available": 0}, "bike": {"total": 0, "occupied": 0, "available": 0}}
+        recorded_at = None
 
     location_name = "All locations"
     if location_id:
