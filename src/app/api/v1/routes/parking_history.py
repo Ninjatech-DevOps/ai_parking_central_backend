@@ -304,9 +304,30 @@ async def export_scans_pdf(
         "show_location": location_id is None,
     }
 
+    # Build hourly data (10AM-6PM) for bar chart — pick closest scan to each hour
+    hourly_data = []
+    for h in range(10, 19):  # 10 AM to 6 PM
+        best = None
+        best_diff = float("inf")
+        for s in items:
+            if s.recorded_at:
+                ist_hour = (s.recorded_at + IST).hour
+                ist_min = (s.recorded_at + IST).minute
+                diff = abs((ist_hour * 60 + ist_min) - h * 60)
+                if diff < best_diff and diff <= 30:  # within 30 min window
+                    best_diff = diff
+                    best = s
+        hourly_data.append({
+            "hour": h,
+            "occ_car": best.car_occupied if best else 0,
+            "tot_car": best.car_total if best else 0,
+            "occ_bike": best.two_wheeler_occupied if best else 0,
+            "tot_bike": best.two_wheeler_total if best else 0,
+        })
+
     # Run PDF generation (which downloads images, blocking) off the event loop
     # so the single-worker server stays responsive (login, etc.) during export.
-    output = await run_in_threadpool(generate_parking_history_pdf, meta, summary, rows)
+    output = await run_in_threadpool(generate_parking_history_pdf, meta, summary, rows, hourly_data)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return StreamingResponse(
         output,
