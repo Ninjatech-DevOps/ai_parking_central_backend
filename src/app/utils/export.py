@@ -1337,10 +1337,9 @@ def _peak_hour_range(hourly: dict, compact: bool = False) -> str:
     fmt = _fmt_hour_short if compact else _fmt_hour_label
     sep = "-" if compact else " - "
 
-    # If 3+ peak hours total, just show span with count
-    total_peak = len(peak_hours)
-    if total_peak >= 3:
-        return f"{fmt(peak_hours[0])}{sep}{fmt(peak_hours[-1])} ({total_peak} hrs)"
+    # If 3+ peak hours total, just show first-last span
+    if len(peak_hours) >= 3:
+        return f"{fmt(peak_hours[0])}{sep}{fmt(peak_hours[-1])}"
 
     parts = []
     for g in groups:
