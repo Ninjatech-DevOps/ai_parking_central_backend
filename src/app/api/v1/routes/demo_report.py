@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select, and_
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.api.deps import (
@@ -21,20 +21,16 @@ from src.app.api.deps import (
     verify_location_in_scope,
 )
 from src.app.core.constants import (
-    AlertSeverity,
-    AlertStatus,
     DeviceStatus,
     Permission,
     SlotState,
     VehicleType,
 )
 from src.app.db.session import get_db
-from src.app.models.alert_event import AlertEvent
 from src.app.models.anpr_record import AnprRecord
 from src.app.models.anpr_session import AnprSession
 from src.app.models.area import Area
 from src.app.models.camera import Camera
-from src.app.models.city import City
 from src.app.models.device import Device
 from src.app.models.floor import Floor
 from src.app.models.location import Location
