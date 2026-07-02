@@ -1504,7 +1504,27 @@ def generate_parking_history_pdf(meta: dict, summary: dict, rows: list) -> io.By
         _occ_tile(pdf, M, y, tw, th, "Total bikes", bike.get("total", 0), "neutral")
         _occ_tile(pdf, M + tw + 6, y, tw, th, "Occupied", bike.get("occupied", 0), "occupied")
         _occ_tile(pdf, M + 2 * (tw + 6), y, tw, th, "Available", bike.get("available", 0), "available")
-        y += th + 7
+        y += th + 6
+
+        # Overall occupancy bar
+        total_all = car.get("total", 0) + bike.get("total", 0)
+        occ_all = car.get("occupied", 0) + bike.get("occupied", 0)
+        avail_all = max(0, total_all - occ_all)
+        pct = round((avail_all / total_all * 100)) if total_all > 0 else 100
+
+        pdf.set_fill_color(*TEAL_50)
+        pdf.set_draw_color(*TEAL_200)
+        pdf.set_line_width(0.3)
+        pdf.rect(M, y, W, 16, "FD")
+        col_w = W / 4
+        _txt(pdf, M + 4, y + 2, col_w, "Total Capacity", size=7, style="B", color=SLATE_500)
+        _txt(pdf, M + 4, y + 7, col_w, str(total_all), size=14, style="B", color=SLATE_900, h=7)
+        _txt(pdf, M + col_w + 4, y + 2, col_w, "Occupied", size=7, style="B", color=SLATE_500)
+        _txt(pdf, M + col_w + 4, y + 7, col_w, str(occ_all), size=14, style="B", color=RED, h=7)
+        _txt(pdf, M + 2 * col_w + 4, y + 2, col_w, "Available", size=7, style="B", color=SLATE_500)
+        _txt(pdf, M + 2 * col_w + 4, y + 7, col_w, str(avail_all), size=14, style="B", color=EMERALD, h=7)
+        _txt(pdf, M, y + 2, W - 4, f"{pct}% Availability", size=14, style="B", color=TEAL, align="R", h=12)
+        y += 22
 
         _txt(pdf, M, y, W, f"Occupancy records ({len(rows)})", size=10, style="B", color=SLATE_900, h=5)
         pdf.set_y(y + 6)
