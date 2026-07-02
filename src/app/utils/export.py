@@ -1337,6 +1337,11 @@ def _peak_hour_range(hourly: dict, compact: bool = False) -> str:
     fmt = _fmt_hour_short if compact else _fmt_hour_label
     sep = "-" if compact else " - "
 
+    # If too many scattered peak hours, show span with count
+    total_peak = len(peak_hours)
+    if total_peak >= 3 and len(groups) >= 3:
+        return f"{fmt(peak_hours[0])}{sep}{fmt(peak_hours[-1])} ({total_peak} hrs)"
+
     parts = []
     for g in groups:
         if len(g) == 1:
@@ -1468,7 +1473,8 @@ def _occupancy_bar_chart(pdf, x, y, w, h, hourly_data):
 
 
 def _mini_stat_tile(pdf, x, y, w, h, label, value, sub=None, color=TEAL):
-    """Small KPI tile for the stats panel: label + big value + optional sub-text."""
+    """Small KPI tile for the stats panel: label + big value + optional sub-text.
+    Auto-shrinks value font if text is too wide for the tile."""
     bg = _tint(color, 0.93)
     pdf.set_fill_color(*bg)
     pdf.set_draw_color(*_tint(color, 0.55))
@@ -1478,10 +1484,18 @@ def _mini_stat_tile(pdf, x, y, w, h, label, value, sub=None, color=TEAL):
     except TypeError:
         pdf.rect(x, y, w, h, "FD")
 
-    _txt(pdf, x + 3, y + 2, w - 6, label, size=6.5, style="B", color=color, h=3)
-    _txt(pdf, x + 3, y + 6.5, w - 6, str(value), size=12, style="B", color=color, h=6)
+    avail = w - 6
+    _txt(pdf, x + 3, y + 2.5, avail, label, size=6.5, style="B", color=color, h=3)
+    # Auto-size: shrink from 12 down to 8 if value text overflows
+    val_str = str(value)
+    val_size = 12
+    pdf.set_font("Helvetica", "B", val_size)
+    while val_size > 8 and pdf.get_string_width(val_str) > avail:
+        val_size -= 0.5
+        pdf.set_font("Helvetica", "B", val_size)
+    _txt(pdf, x + 3, y + 7.5, avail, val_str, size=val_size, style="B", color=color, h=6)
     if sub:
-        _txt(pdf, x + 3, y + h - 5, w - 6, sub, size=5.5, color=SLATE_500, h=3)
+        _txt(pdf, x + 3, y + h - 5.5, avail, sub, size=5.5, color=SLATE_500, h=3)
 
 
 def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
@@ -1489,19 +1503,13 @@ def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
 
     Returns the y position after the section.
     """
-    section_h = 72
+    title_h = 5
     chart_w = W * 0.6
     stats_w = W * 0.38
     stats_x = x + W - stats_w
+    gap = 3
 
-    # ── Left: Bar chart ──
-    _txt(pdf, x, y, chart_w, "Hourly Occupancy (10 AM - 6 PM)", size=8, style="B", color=SLATE_900, h=4)
-    _occupancy_bar_chart(pdf, x, y + 5, chart_w, section_h - 5, hourly_data)
-
-    # ── Right: Stats ──
-    _txt(pdf, stats_x, y, stats_w, "Summary", size=8, style="B", color=SLATE_900, h=4)
-
-    # Compute stats from hourly data
+    # Compute stats first so we know content, then draw at matched height
     hourly_occ = {}  # hour -> total occupied
     all_occ_pcts = []
     max_cars = 0
@@ -1517,8 +1525,7 @@ def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
         max_cars = max(max_cars, d.get("occ_car", 0))
         max_bikes = max(max_bikes, d.get("occ_bike", 0))
 
-    # Use compact format so "11A-3P" fits in tile
-    peak_range = _peak_hour_range(hourly_occ, compact=True)
+    peak_range = _peak_hour_range(hourly_occ)
     peak_val = max(hourly_occ.values()) if hourly_occ else 0
     peak_cap = 0
     if hourly_occ:
@@ -1531,28 +1538,34 @@ def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
     avg_occ = round(sum(all_occ_pcts) / len(all_occ_pcts)) if all_occ_pcts else 0
     peak_occ_pct = max(all_occ_pcts) if all_occ_pcts else 0
 
-    # Find lowest occupancy hour
     lowest_h = min(hourly_occ, key=hourly_occ.get) if hourly_occ else None
     lowest_val = hourly_occ.get(lowest_h, 0) if lowest_h is not None else 0
 
-    # Layout: 3 rows x 2 cols of mini tiles
-    tw = (stats_w - 3) / 2
-    th = (section_h - 5 - 6) / 3  # 3 rows with gaps
-    sy = y + 5
-    gap = 3
+    # Tile layout: 3 rows x 2 cols — compute tile height, then match chart
+    tw = (stats_w - gap) / 2
+    th = 20  # fixed tile height
+    tiles_h = 3 * th + 2 * gap  # total tiles block height
+    section_h = title_h + tiles_h  # chart matches this exactly
+
+    # ── Left: Bar chart ──
+    _txt(pdf, x, y, chart_w, "Hourly Occupancy (10 AM - 6 PM)", size=8, style="B", color=SLATE_900, h=title_h)
+    _occupancy_bar_chart(pdf, x, y + title_h, chart_w, tiles_h, hourly_data)
+
+    # ── Right: Stats ──
+    _txt(pdf, stats_x, y, stats_w, "Summary", size=8, style="B", color=SLATE_900, h=title_h)
+    sy = y + title_h
 
     _mini_stat_tile(pdf, stats_x, sy, tw, th,
-                    "Peak Hour", peak_range,
-                    f"{peak_val}/{peak_cap}" if peak_cap else None, TEAL)
+                    "Peak Hour", peak_range, None, TEAL)
     _mini_stat_tile(pdf, stats_x + tw + gap, sy, tw, th,
                     "Avg Occupancy", f"{avg_occ}%", None, BLUE)
 
     sy += th + gap
     _mini_stat_tile(pdf, stats_x, sy, tw, th,
-                    "Lowest", _fmt_hour_short(lowest_h) if lowest_h is not None else "-",
+                    "Lowest", _fmt_hour_label(lowest_h) if lowest_h is not None else "-",
                     f"{lowest_val} occupied" if lowest_h is not None else None, EMERALD)
     _mini_stat_tile(pdf, stats_x + tw + gap, sy, tw, th,
-                    "Peak Occ %", f"{peak_occ_pct}%",
+                    "Peak Occupancy", f"{peak_occ_pct}%",
                     "highest reached", AMBER)
 
     sy += th + gap
