@@ -1510,7 +1510,18 @@ def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
         max_cars = max(max_cars, car_occ)
         max_bikes = max(max_bikes, bike_occ)
 
-    avg_occ = round(sum(all_occ_pcts) / len(all_occ_pcts)) if all_occ_pcts else 0
+    # Per-type avg occupancy
+    all_car_pcts = []
+    all_bike_pcts = []
+    for r in rows:
+        cc = r.get("tot_car", 0)
+        bc = r.get("tot_bike", 0)
+        if cc > 0:
+            all_car_pcts.append(round(r.get("occ_car", 0) / cc * 100))
+        if bc > 0:
+            all_bike_pcts.append(round(r.get("occ_bike", 0) / bc * 100))
+    avg_car_occ = round(sum(all_car_pcts) / len(all_car_pcts)) if all_car_pcts else 0
+    avg_bike_occ = round(sum(all_bike_pcts) / len(all_bike_pcts)) if all_bike_pcts else 0
 
     # Tile layout: 3 rows x 2 cols — compute tile height, then match chart
     tw = (stats_w - gap) / 2
@@ -1530,15 +1541,19 @@ def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
                     "Peak Hour", peak_label,
                     f"{peak_count} occupied" if peak_count else None, TEAL)
     _mini_stat_tile(pdf, stats_x + tw + gap, sy, tw, th,
-                    "Avg Occupancy", f"{avg_occ}%", None, BLUE)
+                    "Peak Occupancy", f"{peak_occ_pct}%",
+                    "highest reached", AMBER)
 
     sy += th + gap
     _mini_stat_tile(pdf, stats_x, sy, tw, th,
-                    "Lowest", _fmt_hour_label(lowest_h) if lowest_h is not None else "-",
-                    f"{lowest_val} occupied" if lowest_h is not None else None, EMERALD)
+                    "Avg Car Occ", f"{avg_car_occ}%", None, BLUE)
     _mini_stat_tile(pdf, stats_x + tw + gap, sy, tw, th,
-                    "Peak Occupancy", f"{peak_occ_pct}%",
-                    "highest reached", AMBER)
+                    "Avg 2W Occ", f"{avg_bike_occ}%", None, INDIGO)
+
+    # # Lowest hour (commented out)
+    # _mini_stat_tile(pdf, stats_x, sy, tw, th,
+    #                 "Lowest", _fmt_hour_label(lowest_h) if lowest_h is not None else "-",
+    #                 f"{lowest_val} occupied" if lowest_h is not None else None, EMERALD)
 
     sy += th + gap
     _mini_stat_tile(pdf, stats_x, sy, tw, th,
