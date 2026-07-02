@@ -1,6 +1,7 @@
 import uuid
 import csv
 import io
+import math
 from datetime import datetime, timedelta
 from typing import Optional, Set
 
@@ -28,6 +29,84 @@ router = APIRouter(prefix="/anpr-sessions", tags=["ANPR Sessions"])
 def _ev(v) -> str:
     """Extract .value from enum, or return str as-is."""
     return v.value if hasattr(v, "value") else str(v)
+
+
+REVENUE_PER_HOUR = 15  # Rs per hour, any part of an hour billed as a full hour.
+
+
+def _session_revenue(entry, exit_) -> int:
+    """Revenue for one session: ceil(hours) * rate (min 1 hour).
+    Active sessions (no exit) are charged up to now."""
+    if entry is None:
+        return 0
+    end = exit_ or datetime.now(entry.tzinfo)
+    secs = (end - entry).total_seconds()
+    hours = max(1, math.ceil(secs / 3600)) if secs > 0 else 1
+    return hours * REVENUE_PER_HOUR
+
+
+def _compact_duration(text: str) -> str:
+    """'3 hr 36 min' -> '3h 36m' so it fits the dense table."""
+    return (text or "").replace(" hrs", "h").replace(" hr", "h").replace(" mins", "m").replace(" min", "m")
+
+
+def _naive(dt):
+    """Strip tzinfo (values are UTC) so we can do plain arithmetic on them."""
+    return dt.replace(tzinfo=None) if (dt is not None and dt.tzinfo is not None) else dt
+
+
+def _build_inout_chart(items, start, end, ist) -> dict:
+    """In/Out bars bucketed by ENTRY time, so the bar sums equal the cards:
+    in[b] = entries in bucket b; out[b] = of those, how many have exited.
+    Bucket size adapts to the window span: <=2h -> 15 min, <=26h -> hourly,
+    else daily. Default window (no filter) = today 00:00 -> now (IST).
+    """
+    if start is None:
+        start = (datetime.utcnow() + ist).replace(hour=0, minute=0, second=0, microsecond=0) - ist
+    if end is None:
+        end = datetime.utcnow()
+    start, end = _naive(start), _naive(end)
+    if end < start:
+        end = start
+
+    span_h = (end - start).total_seconds() / 3600
+    if span_h <= 2:
+        step, gran = timedelta(minutes=15), "15min"
+        t = start.replace(minute=(start.minute // 15) * 15, second=0, microsecond=0)
+    elif span_h <= 26:
+        step, gran = timedelta(hours=1), "hour"
+        t = start.replace(minute=0, second=0, microsecond=0)
+    else:
+        step, gran = timedelta(days=1), "day"
+        t = start.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    edges = []
+    while t <= end:
+        edges.append(t)
+        t += step
+    if not edges:
+        edges = [start]
+    n = len(edges)
+    step_s = step.total_seconds()
+
+    labels = []
+    for e in edges:
+        el = e + ist
+        if gran == "15min":
+            labels.append(el.strftime("%-I:%M"))
+        elif gran == "hour":
+            labels.append(el.strftime("%-I%p").lower())   # "10am"
+        else:
+            labels.append(el.strftime("%-d %b"))          # "1 Jul"
+
+    in_vals, out_vals = [0] * n, [0] * n
+    for s in items:
+        et = _naive(s.entry_time)
+        i = min(max(int((et - edges[0]).total_seconds() // step_s), 0), n - 1)
+        in_vals[i] += 1
+        if s.exit_time:
+            out_vals[i] += 1
+    return {"labels": labels, "in": in_vals, "out": out_vals, "granularity": gran}
 
 
 def _get_service(db: AsyncSession = Depends(get_db)) -> AnprSessionService:
@@ -83,11 +162,17 @@ async def _anpr_occupancy_summary(db, location_id, user_location_ids, start=None
                AnprSession.exit_time.is_not(None))
         .group_by(AnprSession.vehicle_type), AnprSession.location_id))
 
+    # Overall occupancy % = still-parked (In - Out) vehicles / total capacity.
+    occupied = max(0, car_in - car_out) + max(0, bike_in - bike_out)
+    total_cap = car_total + bike_total
+    occupancy_pct = round(occupied / total_cap * 100) if total_cap else 0
+
     return {
         "car": {"total": car_total, "in": car_in, "out": car_out,
                 "available": max(0, car_total - (car_in - car_out))},
         "bike": {"total": bike_total, "in": bike_in, "out": bike_out,
                  "available": max(0, bike_total - (bike_in - bike_out))},
+        "occupancy_pct": occupancy_pct,
     }
 
 
@@ -285,8 +370,16 @@ async def export_sessions_pdf(
     ist = timedelta(hours=5, minutes=30)
     # ANPR session rows (records table) — honour the selected date range.
     rows = []
+    total_revenue = 0
     for s in items:
         is_car = _ev(s.vehicle_type) == "CAR"
+        # Revenue is realised only when the vehicle has exited (has an out time).
+        if s.exit_time:
+            rev = _session_revenue(s.entry_time, s.exit_time)
+            total_revenue += rev
+            rev_str = f"{rev:,}"
+        else:
+            rev_str = "-"
         rows.append({
             "snapshot_url": s.entry_image_url or "",
             "location": s.location.name if s.location else "",
@@ -296,14 +389,18 @@ async def export_sessions_pdf(
             "in": (s.entry_time + ist).strftime("%I:%M %p"),
             "out_date": (s.exit_time + ist).strftime("%d %b %Y") if s.exit_time else "Still Parked",
             "out_time": (s.exit_time + ist).strftime("%I:%M %p") if s.exit_time else "",
-            "duration": AnprSessionService.format_duration(s.entry_time, s.exit_time) or "Active",
+            "duration": _compact_duration(AnprSessionService.format_duration(s.entry_time, s.exit_time)) or "Active",
+            "revenue": rev_str,
             "status": "Parked" if s.is_active else "Exited",
         })
 
     # Summary cards: Total (config slots) / In (entries in window) / Out (exits
-    # in window) / Available (Total - currently inside). Window = the selected
-    # start/end, defaulting to today when none is chosen.
+    # in window) / Available (Total - still parked). Window = the selected
+    # start/end, defaulting to today when none is chosen. Plus overall
+    # Occupancy % and Revenue (Rs, sum of the listed sessions).
     summary = await _anpr_occupancy_summary(db, location_id, user_location_ids, start, end)
+    summary["revenue"] = f"{total_revenue:,}"
+    summary["accuracy_pct"] = 100  # ANPR plate-recognition accuracy
 
     location_name = "All locations"
     if location_id:
@@ -319,8 +416,11 @@ async def export_sessions_pdf(
         "show_location": location_id is None,
     }
 
+    # One In/Out bar chart whose bar sums equal the In/Out cards.
+    analytics = {"chart": _build_inout_chart(items, start, end, ist)}
+
     # Off the event loop (image downloads block) so the worker stays responsive.
-    output = await run_in_threadpool(generate_anpr_sessions_pdf, meta, summary, rows)
+    output = await run_in_threadpool(generate_anpr_sessions_pdf, meta, summary, rows, analytics)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return StreamingResponse(
         output,

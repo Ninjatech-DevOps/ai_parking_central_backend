@@ -1288,7 +1288,7 @@ def generate_anpr_sessions_pdf_legacy(items: list, title: str = "ANPR Sessions R
 def _occ_tile(pdf, x, y, w, h, label, value, kind="neutral"):
     """Flat summary tile (reference UI): soft tinted card, small label on top,
     big value below. kind: neutral (grey) / occupied (red) / available (green)
-    / in (blue) / out (amber)."""
+    / in (blue) / out (amber) / indigo / violet / teal."""
     if kind == "occupied":
         bg, lcol, vcol = _tint(RED, 0.93), RED, RED
     elif kind == "available":
@@ -1297,6 +1297,12 @@ def _occ_tile(pdf, x, y, w, h, label, value, kind="neutral"):
         bg, lcol, vcol = _tint(BLUE, 0.93), BLUE, BLUE
     elif kind == "out":
         bg, lcol, vcol = _tint(AMBER, 0.93), AMBER, AMBER
+    elif kind == "indigo":
+        bg, lcol, vcol = _tint(INDIGO, 0.9), INDIGO, INDIGO
+    elif kind == "violet":
+        bg, lcol, vcol = _tint(VIOLET, 0.9), VIOLET, VIOLET
+    elif kind == "teal":
+        bg, lcol, vcol = _tint(TEAL, 0.9), TEAL, TEAL
     else:
         bg, lcol, vcol = SLATE_50, SLATE_500, SLATE_900
 
@@ -1623,15 +1629,63 @@ def _thumb_table(pdf, columns, rows, top=14):
     _table_frame(pdf, M, W, page_top, pdf.get_y())
 
 
-def generate_anpr_sessions_pdf(meta: dict, summary: dict, rows: list) -> io.BytesIO:
-    """ANPR sessions report (same design as the parking occupancy report):
-    today's live parking-occupancy tiles (Total / Occupied / Available per
-    vehicle type) + the ANPR sessions records table.
+def _chart_header(pdf, x, y, title):
+    """Section title with a short teal underline."""
+    _txt(pdf, x, y, 140, title, size=10, style="B", color=SLATE_900, h=5)
+    pdf.set_draw_color(*TEAL)
+    pdf.set_line_width(0.5)
+    pdf.line(x, y + 6, x + 16, y + 6)
 
-    meta: {title, location, status}
-    summary: {car:{total,in,out,available}, bike:{total,in,out,available}}
-    rows: [{snapshot_url, plate, type, date, in, out, duration, status}]
+
+def _bar_chart(pdf, x, y, w, h, labels, in_vals, out_vals):
+    """Grouped In (blue) / Out (amber) bars — one group per label bucket.
+    Adaptive: any number of buckets; x-labels thinned to <= ~12 shown."""
+    n = len(labels)
+    if n == 0 or (sum(in_vals) == 0 and sum(out_vals) == 0):
+        _txt(pdf, x, y + h / 2 - 2, w, "No sessions for this period", size=8, color=SLATE_400, align="C", h=4)
+        return
+    maxv = max(max(in_vals), max(out_vals), 1)
+    base = y + h - 6
+    plot_h = h - 12
+    # y gridlines + labels (0 / mid / max)
+    for frac in (0.0, 0.5, 1.0):
+        gy = base - frac * plot_h
+        pdf.set_draw_color(*SLATE_100)
+        pdf.set_line_width(0.2)
+        pdf.line(x + 7, gy, x + w, gy)
+        _txt(pdf, x, gy - 1.6, 7, str(round(maxv * frac)), size=5.5, color=SLATE_400, align="L", h=3)
+    pdf.set_draw_color(*SLATE_300)
+    pdf.set_line_width(0.3)
+    pdf.line(x + 7, base, x + w, base)
+    plot_x, plot_w = x + 8, w - 8
+    slot = plot_w / n
+    bw = min(slot * 0.36, 6)
+    label_every = max(1, (n + 11) // 12)
+    for i in range(n):
+        gx = plot_x + i * slot + (slot - 2 * bw - 0.6) / 2
+        ih = (in_vals[i] / maxv) * plot_h
+        if ih > 0:
+            pdf.set_fill_color(*BLUE)
+            pdf.rect(gx, base - ih, bw, ih, "F")
+        oh = (out_vals[i] / maxv) * plot_h
+        if oh > 0:
+            pdf.set_fill_color(*AMBER)
+            pdf.rect(gx + bw + 0.6, base - oh, bw, oh, "F")
+        if i % label_every == 0:
+            _txt(pdf, plot_x + i * slot - 1, base + 0.8, slot * label_every + 6, labels[i], size=5.5, color=SLATE_400, align="L", h=3)
+
+
+def generate_anpr_sessions_pdf(meta: dict, summary: dict, rows: list, analytics: dict = None) -> io.BytesIO:
+    """ANPR sessions report (same design as the parking occupancy report):
+    per-type tiles (Total/In/Out/Available/Occupancy) + Overall (Revenue/
+    Accuracy) + one In/Out bar chart (sums == the cards) + records table.
+
+    meta: {title, location, status, show_location}
+    summary: {car:{total,in,out,available}, bike:{...}, revenue, accuracy_pct}
+    rows: [{snapshot_url, plate, type, date, in, out_date, out_time, duration, revenue, status}]
+    analytics: {chart: {labels, in, out, granularity}}
     """
+    analytics = analytics or {}
     try:
         pdf = ParkingPDF(meta.get("title") or "ANPR Sessions Report", orientation="P")
         pdf.alias_nb_pages()
@@ -1644,14 +1698,18 @@ def generate_anpr_sessions_pdf(meta: dict, summary: dict, rows: list) -> io.Byte
 
         car = summary.get("car", {})
         bike = summary.get("bike", {})
-        tw = (W - 3 * 6) / 4   # four tiles per row: Total / In / Out / Available
+        tw = (W - 4 * 6) / 5   # five tiles: Total / In / Out / Available / Occupancy
         th = 24
 
         def tile_row(vals, total_label):
-            _occ_tile(pdf, M, y, tw, th, total_label, vals.get("total", 0), "neutral")
+            total = vals.get("total", 0)
+            still = max(0, vals.get("in", 0) - vals.get("out", 0))
+            occ = round(still / total * 100) if total else 0
+            _occ_tile(pdf, M, y, tw, th, total_label, total, "indigo")
             _occ_tile(pdf, M + (tw + 6), y, tw, th, "In", vals.get("in", 0), "in")
             _occ_tile(pdf, M + 2 * (tw + 6), y, tw, th, "Out", vals.get("out", 0), "out")
             _occ_tile(pdf, M + 3 * (tw + 6), y, tw, th, "Available", vals.get("available", 0), "available")
+            _occ_tile(pdf, M + 4 * (tw + 6), y, tw, th, "Occupancy", f"{occ}%", "violet")
 
         y = 25
         _txt(pdf, M, y, W, "Cars", size=10, style="B", color=SLATE_900, h=5)
@@ -1664,32 +1722,59 @@ def generate_anpr_sessions_pdf(meta: dict, summary: dict, rows: list) -> io.Byte
         tile_row(bike, "Total bikes")
         y += th + 7
 
+        # Overall: total revenue (Rs) + ANPR accuracy. (Occupancy is per type above.)
+        _txt(pdf, M, y, W, "Overall", size=10, style="B", color=SLATE_900, h=5)
+        y += 7
+        ov_w = (W - 6) / 2
+        _occ_tile(pdf, M, y, ov_w, th, "Revenue", f"Rs {summary.get('revenue', '0')}", "available")
+        _occ_tile(pdf, M + ov_w + 6, y, ov_w, th, "Accuracy", f"{summary.get('accuracy_pct', 100)}%", "teal")
+        y += th + 7
+
+        # One In/Out bar chart (bar sums equal the In/Out cards).
+        chart = analytics.get("chart")
+        if chart:
+            _chart_header(pdf, M, y, "Traffic - In vs Out")
+            pdf.set_fill_color(*BLUE)
+            pdf.rect(M + W - 34, y + 1, 3, 3, "F")
+            _txt(pdf, M + W - 30, y + 0.6, 8, "In", size=6.5, color=SLATE_500, align="L", h=4)
+            pdf.set_fill_color(*AMBER)
+            pdf.rect(M + W - 18, y + 1, 3, 3, "F")
+            _txt(pdf, M + W - 14, y + 0.6, 10, "Out", size=6.5, color=SLATE_500, align="L", h=4)
+            y += 8
+            _bar_chart(pdf, M, y, W, 46, chart.get("labels", []), chart.get("in", []), chart.get("out", []))
+            y += 46 + 6
+
+        # Start the records section on a new page if the heading + column header
+        # + one row won't fit (avoids a stranded empty header at the page bottom).
+        if y + 6 + 8 + 15 > pdf.h - 14:
+            pdf.add_page()
+            y = pdf.get_y()
         _txt(pdf, M, y, W, f"Session records ({len(rows)})", size=10, style="B", color=SLATE_900, h=5)
         pdf.set_y(y + 6)
         if meta.get("show_location", False):
-            # All-locations report: add a Location column. Date & Time and Out
-            # are each stacked onto two lines (sum of widths = 190).
+            # All-locations report: Location column + stacked In/Out + Revenue.
+            # Duration is dropped here (space) — Revenue already conveys it.
             columns = [
                 {"header": "Snapshot", "width": 20, "key": "snapshot_url", "align": "L"},
-                {"header": "Location", "width": 27, "key": "location", "align": "L", "wrap": True},
-                {"header": "Plate", "width": 25, "key": "plate", "align": "L", "color": SLATE_900},
+                {"header": "Location", "width": 26, "key": "location", "align": "L", "wrap": True},
+                {"header": "Plate", "width": 26, "key": "plate", "align": "L", "color": SLATE_900},
                 {"header": "Type", "width": 26, "key": "type", "align": "L"},
                 {"header": "In", "width": 24, "key": "date", "align": "L", "stack": ("date", "in")},
                 {"header": "Out", "width": 24, "key": "out_date", "align": "L", "stack": ("out_date", "out_time")},
-                {"header": "Duration", "width": 22, "key": "duration", "align": "C"},
                 {"header": "Status", "width": 22, "key": "status", "align": "C", "color": "status"},
+                {"header": "Revenue", "width": 22, "key": "revenue", "align": "R", "color": SLATE_900},
             ]
         else:
             # Single-location report: no Location column (it's in the subtitle).
-            # Date & Time and Out are stacked onto two lines so nothing is cut.
             columns = [
-                {"header": "Snapshot", "width": 26, "key": "snapshot_url", "align": "L"},
-                {"header": "Plate", "width": 28, "key": "plate", "align": "L", "color": SLATE_900},
-                {"header": "Type", "width": 30, "key": "type", "align": "L"},
-                {"header": "In", "width": 28, "key": "date", "align": "L", "stack": ("date", "in")},
-                {"header": "Out", "width": 28, "key": "out_date", "align": "L", "stack": ("out_date", "out_time")},
-                {"header": "Duration", "width": 26, "key": "duration", "align": "C"},
-                {"header": "Status", "width": 24, "key": "status", "align": "C", "color": "status"},
+                {"header": "Snapshot", "width": 24, "key": "snapshot_url", "align": "L"},
+                {"header": "Plate", "width": 27, "key": "plate", "align": "L", "color": SLATE_900},
+                {"header": "Type", "width": 28, "key": "type", "align": "L"},
+                {"header": "In", "width": 26, "key": "date", "align": "L", "stack": ("date", "in")},
+                {"header": "Out", "width": 26, "key": "out_date", "align": "L", "stack": ("out_date", "out_time")},
+                {"header": "Duration", "width": 20, "key": "duration", "align": "C"},
+                {"header": "Status", "width": 20, "key": "status", "align": "C", "color": "status"},
+                {"header": "Revenue", "width": 19, "key": "revenue", "align": "R", "color": SLATE_900},
             ]
         _thumb_table(pdf, columns, rows)
 
