@@ -65,33 +65,33 @@ def _build_inout_chart(items, start, end, ist) -> dict:
         start = (datetime.utcnow() + ist).replace(hour=0, minute=0, second=0, microsecond=0) - ist
     if end is None:
         end = datetime.utcnow()
-    start, end = _naive(start), _naive(end)
-    if end < start:
-        end = start
+    # Work in IST so buckets/labels align to local hours (12am, 1am, ...).
+    start_ist, end_ist = _naive(start) + ist, _naive(end) + ist
+    if end_ist < start_ist:
+        end_ist = start_ist
 
-    span_h = (end - start).total_seconds() / 3600
+    span_h = (end_ist - start_ist).total_seconds() / 3600
     if span_h <= 2:
         step, gran = timedelta(minutes=15), "15min"
-        t = start.replace(minute=(start.minute // 15) * 15, second=0, microsecond=0)
+        t = start_ist.replace(minute=(start_ist.minute // 15) * 15, second=0, microsecond=0)
     elif span_h <= 26:
         step, gran = timedelta(hours=1), "hour"
-        t = start.replace(minute=0, second=0, microsecond=0)
+        t = start_ist.replace(minute=0, second=0, microsecond=0)
     else:
         step, gran = timedelta(days=1), "day"
-        t = start.replace(hour=0, minute=0, second=0, microsecond=0)
+        t = start_ist.replace(hour=0, minute=0, second=0, microsecond=0)
 
     edges = []
-    while t <= end:
+    while t <= end_ist:
         edges.append(t)
         t += step
     if not edges:
-        edges = [start]
+        edges = [start_ist]
     n = len(edges)
     step_s = step.total_seconds()
 
     labels = []
-    for e in edges:
-        el = e + ist
+    for el in edges:
         if gran == "15min":
             labels.append(el.strftime("%-I:%M"))
         elif gran == "hour":
@@ -99,14 +99,47 @@ def _build_inout_chart(items, start, end, ist) -> dict:
         else:
             labels.append(el.strftime("%-d %b"))          # "1 Jul"
 
+    # Bucket by ENTRY time, only within the window -> bar sums == the cards.
     in_vals, out_vals = [0] * n, [0] * n
     for s in items:
-        et = _naive(s.entry_time)
+        et = _naive(s.entry_time) + ist
+        if et < start_ist or et > end_ist:
+            continue
         i = min(max(int((et - edges[0]).total_seconds() // step_s), 0), n - 1)
         in_vals[i] += 1
         if s.exit_time:
             out_vals[i] += 1
     return {"labels": labels, "in": in_vals, "out": out_vals, "granularity": gran}
+
+
+def _duration_breakdown(items, start, end, ist) -> list:
+    """Count completed sessions (with an out time) by stay duration bucket.
+    Only entries within the window, so the counts tie to the Out card."""
+    if start is None:
+        start = (datetime.utcnow() + ist).replace(hour=0, minute=0, second=0, microsecond=0) - ist
+    if end is None:
+        end = datetime.utcnow()
+    start_ist, end_ist = _naive(start) + ist, _naive(end) + ist
+    buckets = [0, 0, 0, 0, 0]   # <30m, 30-60m, 1-2h, 2-8h, >8h
+    for s in items:
+        if not s.exit_time:
+            continue
+        et = _naive(s.entry_time) + ist
+        if et < start_ist or et > end_ist:
+            continue
+        m = (_naive(s.exit_time) - _naive(s.entry_time)).total_seconds() / 60
+        if m < 30:
+            buckets[0] += 1
+        elif m < 60:
+            buckets[1] += 1
+        elif m < 120:
+            buckets[2] += 1
+        elif m < 480:
+            buckets[3] += 1
+        else:
+            buckets[4] += 1
+    labels = ["< 30 min", "30m - 1h", "1 - 2 hrs", "2 - 8 hrs", "> 8 hrs"]
+    return [{"label": labels[i], "count": buckets[i]} for i in range(5)]
 
 
 def _get_service(db: AsyncSession = Depends(get_db)) -> AnprSessionService:
@@ -389,7 +422,7 @@ async def export_sessions_pdf(
             "in": (s.entry_time + ist).strftime("%I:%M %p"),
             "out_date": (s.exit_time + ist).strftime("%d %b %Y") if s.exit_time else "Still Parked",
             "out_time": (s.exit_time + ist).strftime("%I:%M %p") if s.exit_time else "",
-            "duration": _compact_duration(AnprSessionService.format_duration(s.entry_time, s.exit_time)) or "Active",
+            "duration": _compact_duration(AnprSessionService.format_duration(s.entry_time, s.exit_time)) if s.exit_time else "-",
             "revenue": rev_str,
             "status": "Parked" if s.is_active else "Exited",
         })
@@ -416,8 +449,11 @@ async def export_sessions_pdf(
         "show_location": location_id is None,
     }
 
-    # One In/Out bar chart whose bar sums equal the In/Out cards.
-    analytics = {"chart": _build_inout_chart(items, start, end, ist)}
+    # Charts: Hourly Entry Pattern (entries per bucket) + Duration Breakdown.
+    analytics = {
+        "chart": _build_inout_chart(items, start, end, ist),
+        "duration": _duration_breakdown(items, start, end, ist),
+    }
 
     # Off the event loop (image downloads block) so the worker stays responsive.
     output = await run_in_threadpool(generate_anpr_sessions_pdf, meta, summary, rows, analytics)

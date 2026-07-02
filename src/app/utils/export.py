@@ -1942,42 +1942,60 @@ def _chart_header(pdf, x, y, title):
     pdf.line(x, y + 6, x + 16, y + 6)
 
 
-def _bar_chart(pdf, x, y, w, h, labels, in_vals, out_vals):
-    """Grouped In (blue) / Out (amber) bars — one group per label bucket.
-    Adaptive: any number of buckets; x-labels thinned to <= ~12 shown."""
+def _bar_single(pdf, x, y, w, h, labels, vals, color):
+    """Single-series vertical bars with the count above each bar (Hourly
+    Entry Pattern). Adaptive: any number of buckets; x-labels thinned."""
     n = len(labels)
-    if n == 0 or (sum(in_vals) == 0 and sum(out_vals) == 0):
-        _txt(pdf, x, y + h / 2 - 2, w, "No sessions for this period", size=8, color=SLATE_400, align="C", h=4)
+    if n == 0 or sum(vals) == 0:
+        _txt(pdf, x, y + h / 2 - 2, w, "No entries for this period", size=8, color=SLATE_400, align="C", h=4)
         return
-    maxv = max(max(in_vals), max(out_vals), 1)
+    maxv = max(vals) or 1
     base = y + h - 6
-    plot_h = h - 12
-    # y gridlines + labels (0 / mid / max)
-    for frac in (0.0, 0.5, 1.0):
-        gy = base - frac * plot_h
-        pdf.set_draw_color(*SLATE_100)
-        pdf.set_line_width(0.2)
-        pdf.line(x + 7, gy, x + w, gy)
-        _txt(pdf, x, gy - 1.6, 7, str(round(maxv * frac)), size=5.5, color=SLATE_400, align="L", h=3)
+    plot_h = h - 12   # headroom for the value labels on top
     pdf.set_draw_color(*SLATE_300)
     pdf.set_line_width(0.3)
-    pdf.line(x + 7, base, x + w, base)
-    plot_x, plot_w = x + 8, w - 8
-    slot = plot_w / n
-    bw = min(slot * 0.36, 6)
+    pdf.line(x, base, x + w, base)
+    slot = w / n
+    bw = min(slot * 0.62, 13)
     label_every = max(1, (n + 11) // 12)
     for i in range(n):
-        gx = plot_x + i * slot + (slot - 2 * bw - 0.6) / 2
-        ih = (in_vals[i] / maxv) * plot_h
-        if ih > 0:
-            pdf.set_fill_color(*BLUE)
-            pdf.rect(gx, base - ih, bw, ih, "F")
-        oh = (out_vals[i] / maxv) * plot_h
-        if oh > 0:
-            pdf.set_fill_color(*AMBER)
-            pdf.rect(gx + bw + 0.6, base - oh, bw, oh, "F")
+        vh = (vals[i] / maxv) * plot_h
+        bx = x + i * slot + (slot - bw) / 2
+        if vh > 0:
+            pdf.set_fill_color(*color)
+            try:
+                pdf.rect(bx, base - vh, bw, vh, "F", round_corners=True, corner_radius=1)
+            except TypeError:
+                pdf.rect(bx, base - vh, bw, vh, "F")
+            _txt(pdf, bx - 3, base - vh - 3.6, bw + 6, str(vals[i]), size=6, style="B", color=SLATE_700, align="C", h=3)
         if i % label_every == 0:
-            _txt(pdf, plot_x + i * slot - 1, base + 0.8, slot * label_every + 6, labels[i], size=5.5, color=SLATE_400, align="L", h=3)
+            _txt(pdf, x + i * slot, base + 0.8, slot, labels[i], size=5.5, color=SLATE_400, align="C", h=3)
+
+
+def _duration_bars(pdf, x, y, w, h, data):
+    """Horizontal bars for the ANPR duration breakdown (label | track+bar | count)."""
+    colors = [EMERALD, TEAL, BLUE, AMBER, SLATE_400]
+    maxv = max((d["count"] for d in data), default=1) or 1
+    rowh = h / len(data)
+    label_w, val_w = 24, 12
+    track_x = x + label_w
+    track_w = w - label_w - val_w
+    for i, d in enumerate(data):
+        ry = y + i * rowh
+        _txt(pdf, x, ry + rowh / 2 - 2, label_w - 2, d["label"], size=6.5, style="B", color=SLATE_700, align="L", h=4)
+        pdf.set_fill_color(*SLATE_100)
+        try:
+            pdf.rect(track_x, ry + rowh * 0.28, track_w, rowh * 0.44, "F", round_corners=True, corner_radius=1)
+        except TypeError:
+            pdf.rect(track_x, ry + rowh * 0.28, track_w, rowh * 0.44, "F")
+        bl = (d["count"] / maxv) * track_w
+        if bl > 0.5:
+            pdf.set_fill_color(*colors[i % len(colors)])
+            try:
+                pdf.rect(track_x, ry + rowh * 0.28, bl, rowh * 0.44, "F", round_corners=True, corner_radius=1)
+            except TypeError:
+                pdf.rect(track_x, ry + rowh * 0.28, bl, rowh * 0.44, "F")
+        _txt(pdf, track_x + track_w + 2, ry + rowh / 2 - 2, val_w, str(d["count"]), size=7.5, style="B", color=SLATE_900, align="L", h=4)
 
 
 def generate_anpr_sessions_pdf(meta: dict, summary: dict, rows: list, analytics: dict = None) -> io.BytesIO:
@@ -2035,19 +2053,21 @@ def generate_anpr_sessions_pdf(meta: dict, summary: dict, rows: list, analytics:
         _occ_tile(pdf, M + ov_w + 6, y, ov_w, th, "Accuracy", f"{summary.get('accuracy_pct', 100)}%", "teal")
         y += th + 7
 
-        # One In/Out bar chart (bar sums equal the In/Out cards).
+        # Charts side by side, 60 / 40: Hourly Entry Pattern | Duration Breakdown.
         chart = analytics.get("chart")
-        if chart:
-            _chart_header(pdf, M, y, "Traffic - In vs Out")
-            pdf.set_fill_color(*BLUE)
-            pdf.rect(M + W - 34, y + 1, 3, 3, "F")
-            _txt(pdf, M + W - 30, y + 0.6, 8, "In", size=6.5, color=SLATE_500, align="L", h=4)
-            pdf.set_fill_color(*AMBER)
-            pdf.rect(M + W - 18, y + 1, 3, 3, "F")
-            _txt(pdf, M + W - 14, y + 0.6, 10, "Out", size=6.5, color=SLATE_500, align="L", h=4)
-            y += 8
-            _bar_chart(pdf, M, y, W, 46, chart.get("labels", []), chart.get("in", []), chart.get("out", []))
-            y += 46 + 6
+        duration = analytics.get("duration")
+        if chart or duration:
+            ch_w = W * 0.60 - 3
+            du_x = M + ch_w + 6
+            du_w = W * 0.40 - 3
+            _chart_header(pdf, M, y, "Hourly Entry Pattern")
+            _chart_header(pdf, du_x, y, "ANPR Duration Breakdown")
+            cy = y + 8
+            if chart:
+                _bar_single(pdf, M, cy, ch_w, 42, chart.get("labels", []), chart.get("in", []), VIOLET)
+            if duration:
+                _duration_bars(pdf, du_x, cy + 3, du_w, 34, duration)
+            y = cy + 42 + 6
 
         # Start the records section on a new page if the heading + column header
         # + one row won't fit (avoids a stranded empty header at the page bottom).
@@ -2057,17 +2077,18 @@ def generate_anpr_sessions_pdf(meta: dict, summary: dict, rows: list, analytics:
         _txt(pdf, M, y, W, f"Session records ({len(rows)})", size=10, style="B", color=SLATE_900, h=5)
         pdf.set_y(y + 6)
         if meta.get("show_location", False):
-            # All-locations report: Location column + stacked In/Out + Revenue.
-            # Duration is dropped here (space) — Revenue already conveys it.
+            # All-locations report: Location + stacked In/Out + Duration + Revenue.
+            # ("Image" header for the thumbnail so it fits the narrow column.)
             columns = [
-                {"header": "Snapshot", "width": 20, "key": "snapshot_url", "align": "L"},
-                {"header": "Location", "width": 26, "key": "location", "align": "L", "wrap": True},
-                {"header": "Plate", "width": 26, "key": "plate", "align": "L", "color": SLATE_900},
-                {"header": "Type", "width": 26, "key": "type", "align": "L"},
+                {"header": "Image", "width": 18, "key": "snapshot_url", "align": "L"},
+                {"header": "Location", "width": 24, "key": "location", "align": "L", "wrap": True},
+                {"header": "Plate", "width": 25, "key": "plate", "align": "L", "color": SLATE_900},
+                {"header": "Type", "width": 25, "key": "type", "align": "L"},
                 {"header": "In", "width": 24, "key": "date", "align": "L", "stack": ("date", "in")},
                 {"header": "Out", "width": 24, "key": "out_date", "align": "L", "stack": ("out_date", "out_time")},
-                {"header": "Status", "width": 22, "key": "status", "align": "C", "color": "status"},
-                {"header": "Revenue", "width": 22, "key": "revenue", "align": "R", "color": SLATE_900},
+                {"header": "Duration", "width": 16, "key": "duration", "align": "C"},
+                {"header": "Status", "width": 16, "key": "status", "align": "C", "color": "status"},
+                {"header": "Revenue", "width": 18, "key": "revenue", "align": "R", "color": SLATE_900},
             ]
         else:
             # Single-location report: no Location column (it's in the subtitle).
