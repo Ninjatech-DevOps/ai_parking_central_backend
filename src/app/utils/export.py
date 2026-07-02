@@ -1493,16 +1493,24 @@ def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
     all_occ_pcts = []
     max_cars = 0
     max_bikes = 0
+    peak_occ_pct = 0
     for r in rows:
-        occ = r.get("occ_car", 0) + r.get("occ_bike", 0)
-        cap = r.get("tot_car", 0) + r.get("tot_bike", 0)
-        if cap > 0:
-            all_occ_pcts.append(round(occ / cap * 100))
-        max_cars = max(max_cars, r.get("occ_car", 0))
-        max_bikes = max(max_bikes, r.get("occ_bike", 0))
+        car_occ = r.get("occ_car", 0)
+        car_cap = r.get("tot_car", 0)
+        bike_occ = r.get("occ_bike", 0)
+        bike_cap = r.get("tot_bike", 0)
+        total_occ = car_occ + bike_occ
+        total_cap = car_cap + bike_cap
+        if total_cap > 0:
+            all_occ_pcts.append(round(total_occ / total_cap * 100))
+        # Peak = highest individual type %, so 7/7 cars = 100% even if 2W is 0/2
+        car_pct = round(car_occ / car_cap * 100) if car_cap > 0 else 0
+        bike_pct = round(bike_occ / bike_cap * 100) if bike_cap > 0 else 0
+        peak_occ_pct = max(peak_occ_pct, car_pct, bike_pct)
+        max_cars = max(max_cars, car_occ)
+        max_bikes = max(max_bikes, bike_occ)
 
     avg_occ = round(sum(all_occ_pcts) / len(all_occ_pcts)) if all_occ_pcts else 0
-    peak_occ_pct = max(all_occ_pcts) if all_occ_pcts else 0
 
     # Tile layout: 3 rows x 2 cols — compute tile height, then match chart
     tw = (stats_w - gap) / 2
