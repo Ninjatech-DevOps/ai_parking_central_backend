@@ -1490,31 +1490,30 @@ def generate_parking_history_pdf(meta: dict, summary: dict, rows: list) -> io.By
 
         car = summary.get("car", {})
         bike = summary.get("bike", {})
-        tw = (W - 2 * 6) / 3
+        tw = (W - 3 * 6) / 4
         th = 24
 
         y = 25
+        car_total = car.get("total", 0)
+        car_occ = car.get("occupied", 0)
+        car_pct = round((car_occ / car_total * 100)) if car_total > 0 else 0
         _txt(pdf, M, y, W, "Cars", size=10, style="B", color=SLATE_900, h=5)
         y += 7
-        _occ_tile(pdf, M, y, tw, th, "Total cars", car.get("total", 0), "neutral")
-        _occ_tile(pdf, M + tw + 6, y, tw, th, "Occupied", car.get("occupied", 0), "occupied")
+        _occ_tile(pdf, M, y, tw, th, "Total cars", car_total, "neutral")
+        _occ_tile(pdf, M + tw + 6, y, tw, th, "Occupied", car_occ, "occupied")
         _occ_tile(pdf, M + 2 * (tw + 6), y, tw, th, "Available", car.get("available", 0), "available")
+        _occ_tile(pdf, M + 3 * (tw + 6), y, tw, th, "Occupancy", f"{car_pct}%", "teal")
         y += th + 6
 
-        _txt(pdf, M, y, W, "Bikes", size=10, style="B", color=SLATE_900, h=5)
+        bike_total = bike.get("total", 0)
+        bike_occ = bike.get("occupied", 0)
+        bike_pct = round((bike_occ / bike_total * 100)) if bike_total > 0 else 0
+        _txt(pdf, M, y, W, "2 Wheeler", size=10, style="B", color=SLATE_900, h=5)
         y += 7
-        _occ_tile(pdf, M, y, tw, th, "Total bikes", bike.get("total", 0), "neutral")
-        _occ_tile(pdf, M + tw + 6, y, tw, th, "Occupied", bike.get("occupied", 0), "occupied")
+        _occ_tile(pdf, M, y, tw, th, "Total 2W", bike_total, "neutral")
+        _occ_tile(pdf, M + tw + 6, y, tw, th, "Occupied", bike_occ, "occupied")
         _occ_tile(pdf, M + 2 * (tw + 6), y, tw, th, "Available", bike.get("available", 0), "available")
-        y += th + 6
-
-        # Occupancy % tile
-        total_all = car.get("total", 0) + bike.get("total", 0)
-        occ_all = car.get("occupied", 0) + bike.get("occupied", 0)
-        occ_pct = round((occ_all / total_all * 100)) if total_all > 0 else 0
-        _txt(pdf, M, y, W, "Occupancy", size=10, style="B", color=SLATE_900, h=5)
-        y += 7
-        _occ_tile(pdf, M, y, tw, th, "Occupancy Rate", f"{occ_pct}%", "teal")
+        _occ_tile(pdf, M + 3 * (tw + 6), y, tw, th, "Occupancy", f"{bike_pct}%", "teal")
         y += th + 7
 
         _txt(pdf, M, y, W, f"Occupancy records ({len(rows)})", size=10, style="B", color=SLATE_900, h=5)
