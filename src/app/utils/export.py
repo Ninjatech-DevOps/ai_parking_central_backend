@@ -1297,6 +1297,8 @@ def _occ_tile(pdf, x, y, w, h, label, value, kind="neutral"):
         bg, lcol, vcol = _tint(BLUE, 0.93), BLUE, BLUE
     elif kind == "out":
         bg, lcol, vcol = _tint(AMBER, 0.93), AMBER, AMBER
+    elif kind == "teal":
+        bg, lcol, vcol = _tint(TEAL, 0.93), TEAL, TEAL
     else:
         bg, lcol, vcol = SLATE_50, SLATE_500, SLATE_900
 
@@ -1506,45 +1508,14 @@ def generate_parking_history_pdf(meta: dict, summary: dict, rows: list) -> io.By
         _occ_tile(pdf, M + 2 * (tw + 6), y, tw, th, "Available", bike.get("available", 0), "available")
         y += th + 6
 
-        # Overall occupancy card
+        # Occupancy % tile
         total_all = car.get("total", 0) + bike.get("total", 0)
         occ_all = car.get("occupied", 0) + bike.get("occupied", 0)
-        avail_all = max(0, total_all - occ_all)
         occ_pct = round((occ_all / total_all * 100)) if total_all > 0 else 0
-        bar_w_frac = occ_all / total_all if total_all > 0 else 0
-
-        card_h = 20
-        pdf.set_fill_color(*WHITE)
-        pdf.set_draw_color(*SLATE_300)
-        pdf.set_line_width(0.3)
-        pdf.rect(M, y, W, card_h, "FD")
-        col_w = W / 4
-        # Total
-        _txt(pdf, M + 4, y + 3, col_w, "TOTAL CAPACITY", size=6, style="B", color=SLATE_400)
-        _txt(pdf, M + 4, y + 9, col_w, str(total_all), size=16, style="B", color=SLATE_900, h=8)
-        # Occupied
-        pdf.set_fill_color(254, 242, 242)  # red-50
-        pdf.rect(M + col_w, y, col_w, card_h, "F")
-        _txt(pdf, M + col_w + 4, y + 3, col_w, "OCCUPIED", size=6, style="B", color=RED)
-        _txt(pdf, M + col_w + 4, y + 9, col_w, str(occ_all), size=16, style="B", color=RED, h=8)
-        # Available
-        pdf.set_fill_color(240, 253, 244)  # emerald-50
-        pdf.rect(M + 2 * col_w, y, col_w, card_h, "F")
-        _txt(pdf, M + 2 * col_w + 4, y + 3, col_w, "AVAILABLE", size=6, style="B", color=EMERALD)
-        _txt(pdf, M + 2 * col_w + 4, y + 9, col_w, str(avail_all), size=16, style="B", color=EMERALD, h=8)
-        # Occupancy %
-        pdf.set_fill_color(*TEAL_50)
-        pdf.rect(M + 3 * col_w, y, col_w, card_h, "F")
-        _txt(pdf, M + 3 * col_w + 4, y + 3, col_w - 8, "OCCUPANCY", size=6, style="B", color=TEAL)
-        _txt(pdf, M + 3 * col_w + 4, y + 9, col_w - 8, f"{occ_pct}%", size=16, style="B", color=TEAL, h=8)
-        # Progress bar
-        bar_y = y + card_h
-        pdf.set_fill_color(209, 250, 229)  # emerald-100
-        pdf.rect(M, bar_y, W, 2, "F")
-        bar_color = RED if occ_pct >= 90 else AMBER if occ_pct >= 60 else TEAL
-        pdf.set_fill_color(*bar_color)
-        pdf.rect(M, bar_y, W * bar_w_frac, 2, "F")
-        y += card_h + 8
+        _txt(pdf, M, y, W, "Occupancy", size=10, style="B", color=SLATE_900, h=5)
+        y += 7
+        _occ_tile(pdf, M, y, tw, th, "Occupancy Rate", f"{occ_pct}%", "teal")
+        y += th + 7
 
         _txt(pdf, M, y, W, f"Occupancy records ({len(rows)})", size=10, style="B", color=SLATE_900, h=5)
         pdf.set_y(y + 6)
