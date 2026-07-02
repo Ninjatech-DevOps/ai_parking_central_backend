@@ -1285,6 +1285,298 @@ def generate_anpr_sessions_pdf_legacy(items: list, title: str = "ANPR Sessions R
 # report" page: Cars/Bikes summary tiles + an occupancy-records table with
 # per-row snapshot thumbnails. (Card-per-scan layout preserved as *_legacy.)
 # ─────────────────────────────────────────────────────────────────────────────
+def _fmt_hour_label(h: int) -> str:
+    """10 -> '10 AM', 13 -> '1 PM', etc."""
+    if h == 0:
+        return "12 AM"
+    if h < 12:
+        return f"{h} AM"
+    if h == 12:
+        return "12 PM"
+    return f"{h - 12} PM"
+
+
+def _fmt_hour_short(h: int) -> str:
+    """Compact hour: 10 -> '10A', 13 -> '1P'."""
+    if h == 0:
+        return "12A"
+    if h < 12:
+        return f"{h}A"
+    if h == 12:
+        return "12P"
+    return f"{h - 12}P"
+
+
+def _peak_hour_range(hourly: dict, compact: bool = False) -> str:
+    """Compute peak hour display with range support.
+
+    If multiple consecutive hours share the peak count, collapse into a range.
+    Non-consecutive groups are comma-separated.
+    compact=True uses short format ('11A-3P') for tight spaces.
+    Examples:
+      {10:5, 11:5, 12:3} -> '10 AM - 11 AM'  or  '10A-11A'
+      {10:5, 11:5, 13:5, 14:5} -> '10 AM - 11 AM, 1 PM - 2 PM'
+      {10:5, 12:3} -> '10 AM'  or  '10A'
+      {} -> '-'
+    """
+    if not hourly:
+        return "-"
+    peak_val = max(hourly.values())
+    if peak_val == 0:
+        return "-"
+    peak_hours = sorted(h for h, v in hourly.items() if v == peak_val)
+
+    # Group into consecutive runs
+    groups: list[list[int]] = []
+    for h in peak_hours:
+        if groups and h == groups[-1][-1] + 1:
+            groups[-1].append(h)
+        else:
+            groups.append([h])
+
+    fmt = _fmt_hour_short if compact else _fmt_hour_label
+    sep = "-" if compact else " - "
+
+    # If 3+ peak hours total, just show span with count
+    total_peak = len(peak_hours)
+    if total_peak >= 3:
+        return f"{fmt(peak_hours[0])}{sep}{fmt(peak_hours[-1])} ({total_peak} hrs)"
+
+    parts = []
+    for g in groups:
+        if len(g) == 1:
+            parts.append(fmt(g[0]))
+        else:
+            parts.append(f"{fmt(g[0])}{sep}{fmt(g[-1])}")
+    return ", ".join(parts)
+
+
+def _occupancy_bar_chart(pdf, x, y, w, h, hourly_data):
+    """Draw a grouped bar chart: car (blue) + 2W (indigo) per hour.
+
+    hourly_data: list of {hour, occ_car, tot_car, occ_bike, tot_bike}
+    """
+    if not hourly_data:
+        return
+
+    M_left = 14   # space for Y-axis labels
+    M_bottom = 10  # space for X-axis labels
+    M_top = 4
+    M_right = 4
+    chart_w = w - M_left - M_right
+    chart_h = h - M_bottom - M_top
+    cx = x + M_left
+    cy = y + M_top
+
+    n = len(hourly_data)
+    if n == 0:
+        return
+
+    # Find max value for Y scale
+    max_val = max(
+        max(d.get("occ_car", 0) for d in hourly_data),
+        max(d.get("occ_bike", 0) for d in hourly_data),
+        max(d.get("tot_car", 0) for d in hourly_data),
+        max(d.get("tot_bike", 0) for d in hourly_data),
+        1,
+    )
+    # Round up to nice number
+    if max_val <= 5:
+        y_max = max_val
+    elif max_val <= 10:
+        y_max = 10
+    elif max_val <= 20:
+        y_max = 20
+    elif max_val <= 50:
+        y_max = (max_val // 10 + 1) * 10
+    else:
+        y_max = (max_val // 25 + 1) * 25
+
+    # Background
+    pdf.set_fill_color(*WHITE)
+    pdf.set_draw_color(*SLATE_300)
+    pdf.set_line_width(0.2)
+    pdf.rect(cx, cy, chart_w, chart_h, "D")
+
+    # Y-axis gridlines + labels
+    n_gridlines = min(4, y_max)
+    if n_gridlines > 0:
+        for i in range(n_gridlines + 1):
+            gy = cy + chart_h - (i / n_gridlines) * chart_h
+            val = round(i / n_gridlines * y_max)
+            # Gridline
+            if i > 0:
+                pdf.set_draw_color(*SLATE_100)
+                pdf.set_line_width(0.1)
+                pdf.line(cx, gy, cx + chart_w, gy)
+            # Label
+            _txt(pdf, x, gy - 1.5, M_left - 2, str(val), size=6, color=SLATE_500, align="R", h=3)
+
+    # Bars
+    group_w = chart_w / n
+    bar_gap = max(1, group_w * 0.15)
+    bar_area = group_w - bar_gap
+    bar_w = bar_area / 2 - 0.5  # two bars per group
+
+    for i, d in enumerate(hourly_data):
+        gx = cx + i * group_w + bar_gap / 2
+        occ_car = d.get("occ_car", 0)
+        occ_bike = d.get("occ_bike", 0)
+
+        # Car bar (blue)
+        if occ_car > 0 and y_max > 0:
+            bh = (occ_car / y_max) * chart_h
+            by = cy + chart_h - bh
+            pdf.set_fill_color(*BLUE)
+            pdf.rect(gx, by, bar_w, bh, "F")
+
+        # 2W bar (indigo)
+        if occ_bike > 0 and y_max > 0:
+            bh = (occ_bike / y_max) * chart_h
+            by = cy + chart_h - bh
+            pdf.set_fill_color(*INDIGO)
+            pdf.rect(gx + bar_w + 1, by, bar_w, bh, "F")
+
+        # X-axis label
+        hour_label = _fmt_hour_label(d.get("hour", 0))
+        # Shorten: "10 AM" -> "10A", "1 PM" -> "1P"
+        short = hour_label.replace(" AM", "A").replace(" PM", "P")
+        _txt(pdf, gx - 1, cy + chart_h + 1, group_w + 2, short, size=5.5, color=SLATE_500, align="C", h=3)
+
+    # Capacity dashed lines
+    car_cap = max((d.get("tot_car", 0) for d in hourly_data), default=0)
+    bike_cap = max((d.get("tot_bike", 0) for d in hourly_data), default=0)
+
+    for cap, color, label in [(car_cap, BLUE, "Car cap"), (bike_cap, INDIGO, "2W cap")]:
+        if cap > 0 and y_max > 0:
+            ly = cy + chart_h - (cap / y_max) * chart_h
+            if ly >= cy:
+                pdf.set_draw_color(*color)
+                pdf.set_line_width(0.15)
+                # Dashed line
+                dash_len = 2
+                dx = cx
+                while dx < cx + chart_w:
+                    end = min(dx + dash_len, cx + chart_w)
+                    pdf.line(dx, ly, end, ly)
+                    dx += dash_len * 2
+
+    # Legend (bottom-right of chart)
+    lx = cx + chart_w - 38
+    ly = cy + chart_h + 4
+    pdf.set_fill_color(*BLUE)
+    pdf.rect(lx, ly + 0.5, 3, 2, "F")
+    _txt(pdf, lx + 4, ly, 12, "Car", size=5.5, color=SLATE_500, h=3)
+    pdf.set_fill_color(*INDIGO)
+    pdf.rect(lx + 18, ly + 0.5, 3, 2, "F")
+    _txt(pdf, lx + 22, ly, 12, "2W", size=5.5, color=SLATE_500, h=3)
+
+
+def _mini_stat_tile(pdf, x, y, w, h, label, value, sub=None, color=TEAL):
+    """Small KPI tile for the stats panel: label + big value + optional sub-text.
+    Auto-shrinks value font if text is too wide for the tile."""
+    bg = _tint(color, 0.93)
+    pdf.set_fill_color(*bg)
+    pdf.set_draw_color(*_tint(color, 0.55))
+    pdf.set_line_width(0.15)
+    try:
+        pdf.rect(x, y, w, h, "FD", round_corners=True, corner_radius=2)
+    except TypeError:
+        pdf.rect(x, y, w, h, "FD")
+
+    avail = w - 6
+    _txt(pdf, x + 3, y + 2.5, avail, label, size=6.5, style="B", color=color, h=3)
+    # Auto-size: shrink from 12 down to 8 if value text overflows
+    val_str = str(value)
+    val_size = 12
+    pdf.set_font("Helvetica", "B", val_size)
+    while val_size > 8 and pdf.get_string_width(val_str) > avail:
+        val_size -= 0.5
+        pdf.set_font("Helvetica", "B", val_size)
+    _txt(pdf, x + 3, y + 7.5, avail, val_str, size=val_size, style="B", color=color, h=6)
+    if sub:
+        _txt(pdf, x + 3, y + h - 5.5, avail, sub, size=5.5, color=SLATE_500, h=3)
+
+
+def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
+    """60/40 layout: bar chart (left) + 6 stat tiles (right).
+
+    Returns the y position after the section.
+    """
+    title_h = 5
+    chart_w = W * 0.6
+    stats_w = W * 0.38
+    stats_x = x + W - stats_w
+    gap = 3
+
+    # Compute stats first so we know content, then draw at matched height
+    hourly_occ = {}  # hour -> total occupied
+    all_occ_pcts = []
+    max_cars = 0
+    max_bikes = 0
+
+    for d in hourly_data:
+        h = d.get("hour", 0)
+        occ = d.get("occ_car", 0) + d.get("occ_bike", 0)
+        cap = d.get("tot_car", 0) + d.get("tot_bike", 0)
+        hourly_occ[h] = occ
+        if cap > 0:
+            all_occ_pcts.append(round(occ / cap * 100))
+        max_cars = max(max_cars, d.get("occ_car", 0))
+        max_bikes = max(max_bikes, d.get("occ_bike", 0))
+
+    peak_range = _peak_hour_range(hourly_occ)
+    peak_val = max(hourly_occ.values()) if hourly_occ else 0
+    peak_cap = 0
+    if hourly_occ:
+        peak_h = max(hourly_occ, key=hourly_occ.get)
+        for d in hourly_data:
+            if d.get("hour") == peak_h:
+                peak_cap = d.get("tot_car", 0) + d.get("tot_bike", 0)
+                break
+
+    avg_occ = round(sum(all_occ_pcts) / len(all_occ_pcts)) if all_occ_pcts else 0
+    peak_occ_pct = max(all_occ_pcts) if all_occ_pcts else 0
+
+    lowest_h = min(hourly_occ, key=hourly_occ.get) if hourly_occ else None
+    lowest_val = hourly_occ.get(lowest_h, 0) if lowest_h is not None else 0
+
+    # Tile layout: 3 rows x 2 cols — compute tile height, then match chart
+    tw = (stats_w - gap) / 2
+    th = 20  # fixed tile height
+    tiles_h = 3 * th + 2 * gap  # total tiles block height
+    section_h = title_h + tiles_h  # chart matches this exactly
+
+    # ── Left: Bar chart ──
+    _txt(pdf, x, y, chart_w, "Hourly Occupancy (10 AM - 6 PM)", size=8, style="B", color=SLATE_900, h=title_h)
+    _occupancy_bar_chart(pdf, x, y + title_h, chart_w, tiles_h, hourly_data)
+
+    # ── Right: Stats ──
+    _txt(pdf, stats_x, y, stats_w, "Summary", size=8, style="B", color=SLATE_900, h=title_h)
+    sy = y + title_h
+
+    _mini_stat_tile(pdf, stats_x, sy, tw, th,
+                    "Peak Hour", peak_range, None, TEAL)
+    _mini_stat_tile(pdf, stats_x + tw + gap, sy, tw, th,
+                    "Avg Occupancy", f"{avg_occ}%", None, BLUE)
+
+    sy += th + gap
+    _mini_stat_tile(pdf, stats_x, sy, tw, th,
+                    "Lowest", _fmt_hour_label(lowest_h) if lowest_h is not None else "-",
+                    f"{lowest_val} occupied" if lowest_h is not None else None, EMERALD)
+    _mini_stat_tile(pdf, stats_x + tw + gap, sy, tw, th,
+                    "Peak Occupancy", f"{peak_occ_pct}%",
+                    "highest reached", AMBER)
+
+    sy += th + gap
+    _mini_stat_tile(pdf, stats_x, sy, tw, th,
+                    "Max Cars", str(max_cars), None, BLUE)
+    _mini_stat_tile(pdf, stats_x + tw + gap, sy, tw, th,
+                    "Max 2W", str(max_bikes), None, INDIGO)
+
+    return y + section_h + 4
+
+
 def _occ_tile(pdf, x, y, w, h, label, value, kind="neutral"):
     """Flat summary tile (reference UI): soft tinted card, small label on top,
     big value below. kind: neutral (grey) / occupied (red) / available (green)
@@ -1475,12 +1767,13 @@ def _records_table(pdf, rows, top=14, show_location=True):
     _table_frame(pdf, M, W, page_top, pdf.get_y())
 
 
-def generate_parking_history_pdf(meta: dict, summary: dict, rows: list) -> io.BytesIO:
-    """Parking occupancy report: Cars/Bikes summary tiles + occupancy-records table.
+def generate_parking_history_pdf(meta: dict, summary: dict, rows: list, hourly_data: list = None) -> io.BytesIO:
+    """Parking occupancy report: Cars/Bikes summary tiles + bar chart + stats + records table.
 
     meta: {title, location, status}
     summary: {car:{total,occupied,available}, bike:{total,occupied,available}}
     rows: [{snapshot_url, date, time, occ_car, avl_car, occ_bike, avl_bike}]
+    hourly_data: [{hour, occ_car, tot_car, occ_bike, tot_bike}] (10AM-6PM)
     """
     try:
         pdf = ParkingPDF(meta.get("title") or "Parking Occupancy Report", orientation="P")
@@ -1494,23 +1787,35 @@ def generate_parking_history_pdf(meta: dict, summary: dict, rows: list) -> io.By
 
         car = summary.get("car", {})
         bike = summary.get("bike", {})
-        tw = (W - 2 * 6) / 3
+        tw = (W - 3 * 6) / 4
         th = 24
 
         y = 25
+        car_total = car.get("total", 0)
+        car_occ = car.get("occupied", 0)
+        car_pct = round((car_occ / car_total * 100)) if car_total > 0 else 0
         _txt(pdf, M, y, W, "Cars", size=10, style="B", color=SLATE_900, h=5)
         y += 7
-        _occ_tile(pdf, M, y, tw, th, "Total cars", car.get("total", 0), "neutral")
-        _occ_tile(pdf, M + tw + 6, y, tw, th, "Occupied", car.get("occupied", 0), "occupied")
+        _occ_tile(pdf, M, y, tw, th, "Total cars", car_total, "neutral")
+        _occ_tile(pdf, M + tw + 6, y, tw, th, "Occupied", car_occ, "occupied")
         _occ_tile(pdf, M + 2 * (tw + 6), y, tw, th, "Available", car.get("available", 0), "available")
+        _occ_tile(pdf, M + 3 * (tw + 6), y, tw, th, "Occupancy", f"{car_pct}%", "teal")
         y += th + 6
 
-        _txt(pdf, M, y, W, "Bikes", size=10, style="B", color=SLATE_900, h=5)
+        bike_total = bike.get("total", 0)
+        bike_occ = bike.get("occupied", 0)
+        bike_pct = round((bike_occ / bike_total * 100)) if bike_total > 0 else 0
+        _txt(pdf, M, y, W, "2 Wheeler", size=10, style="B", color=SLATE_900, h=5)
         y += 7
-        _occ_tile(pdf, M, y, tw, th, "Total bikes", bike.get("total", 0), "neutral")
-        _occ_tile(pdf, M + tw + 6, y, tw, th, "Occupied", bike.get("occupied", 0), "occupied")
+        _occ_tile(pdf, M, y, tw, th, "Total 2W", bike_total, "neutral")
+        _occ_tile(pdf, M + tw + 6, y, tw, th, "Occupied", bike_occ, "occupied")
         _occ_tile(pdf, M + 2 * (tw + 6), y, tw, th, "Available", bike.get("available", 0), "available")
+        _occ_tile(pdf, M + 3 * (tw + 6), y, tw, th, "Occupancy", f"{bike_pct}%", "teal")
         y += th + 7
+
+        # Chart + Stats section (if hourly data provided)
+        if hourly_data:
+            y = _chart_and_stats_section(pdf, M, y, W, hourly_data, rows)
 
         _txt(pdf, M, y, W, f"Occupancy records ({len(rows)})", size=10, style="B", color=SLATE_900, h=5)
         pdf.set_y(y + 6)
