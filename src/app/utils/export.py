@@ -1307,47 +1307,19 @@ def _fmt_hour_short(h: int) -> str:
     return f"{h - 12}P"
 
 
-def _peak_hour_range(hourly: dict, compact: bool = False) -> str:
-    """Compute peak hour display with range support.
+def _peak_hour_display(hourly: dict) -> tuple:
+    """Return (peak_hour_label, occupied_count) for the busiest hour.
 
-    If multiple consecutive hours share the peak count, collapse into a range.
-    Non-consecutive groups are comma-separated.
-    compact=True uses short format ('11A-3P') for tight spaces.
-    Examples:
-      {10:5, 11:5, 12:3} -> '10 AM - 11 AM'  or  '10A-11A'
-      {10:5, 11:5, 13:5, 14:5} -> '10 AM - 11 AM, 1 PM - 2 PM'
-      {10:5, 12:3} -> '10 AM'  or  '10A'
-      {} -> '-'
+    Always returns the single first hour with the highest count.
+    Returns ("-", 0) if no data.
     """
     if not hourly:
-        return "-"
+        return "-", 0
     peak_val = max(hourly.values())
     if peak_val == 0:
-        return "-"
-    peak_hours = sorted(h for h, v in hourly.items() if v == peak_val)
-
-    # Group into consecutive runs
-    groups: list[list[int]] = []
-    for h in peak_hours:
-        if groups and h == groups[-1][-1] + 1:
-            groups[-1].append(h)
-        else:
-            groups.append([h])
-
-    fmt = _fmt_hour_short if compact else _fmt_hour_label
-    sep = "-" if compact else " - "
-
-    # If 3+ peak hours total, just show first-last span
-    if len(peak_hours) >= 3:
-        return f"{fmt(peak_hours[0])}{sep}{fmt(peak_hours[-1])}"
-
-    parts = []
-    for g in groups:
-        if len(g) == 1:
-            parts.append(fmt(g[0]))
-        else:
-            parts.append(f"{fmt(g[0])}{sep}{fmt(g[-1])}")
-    return ", ".join(parts)
+        return "-", 0
+    peak_h = min(h for h, v in hourly.items() if v == peak_val)
+    return _fmt_hour_label(peak_h), peak_val
 
 
 def _occupancy_bar_chart(pdf, x, y, w, h, hourly_data):
@@ -1508,37 +1480,29 @@ def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
     stats_x = x + W - stats_w
     gap = 3
 
-    # Compute stats first so we know content, then draw at matched height
+    # Hourly stats (for chart + peak hour)
     hourly_occ = {}  # hour -> total occupied
+    for d in hourly_data:
+        hourly_occ[d.get("hour", 0)] = d.get("occ_car", 0) + d.get("occ_bike", 0)
+
+    peak_label, peak_count = _peak_hour_display(hourly_occ)
+    lowest_h = min(hourly_occ, key=hourly_occ.get) if hourly_occ else None
+    lowest_val = hourly_occ.get(lowest_h, 0) if lowest_h is not None else 0
+
+    # Detailed stats from ALL scan rows (every 5-min interval, not just hourly)
     all_occ_pcts = []
     max_cars = 0
     max_bikes = 0
-
-    for d in hourly_data:
-        h = d.get("hour", 0)
-        occ = d.get("occ_car", 0) + d.get("occ_bike", 0)
-        cap = d.get("tot_car", 0) + d.get("tot_bike", 0)
-        hourly_occ[h] = occ
+    for r in rows:
+        occ = r.get("occ_car", 0) + r.get("occ_bike", 0)
+        cap = r.get("tot_car", 0) + r.get("tot_bike", 0)
         if cap > 0:
             all_occ_pcts.append(round(occ / cap * 100))
-        max_cars = max(max_cars, d.get("occ_car", 0))
-        max_bikes = max(max_bikes, d.get("occ_bike", 0))
-
-    peak_range = _peak_hour_range(hourly_occ)
-    peak_val = max(hourly_occ.values()) if hourly_occ else 0
-    peak_cap = 0
-    if hourly_occ:
-        peak_h = max(hourly_occ, key=hourly_occ.get)
-        for d in hourly_data:
-            if d.get("hour") == peak_h:
-                peak_cap = d.get("tot_car", 0) + d.get("tot_bike", 0)
-                break
+        max_cars = max(max_cars, r.get("occ_car", 0))
+        max_bikes = max(max_bikes, r.get("occ_bike", 0))
 
     avg_occ = round(sum(all_occ_pcts) / len(all_occ_pcts)) if all_occ_pcts else 0
     peak_occ_pct = max(all_occ_pcts) if all_occ_pcts else 0
-
-    lowest_h = min(hourly_occ, key=hourly_occ.get) if hourly_occ else None
-    lowest_val = hourly_occ.get(lowest_h, 0) if lowest_h is not None else 0
 
     # Tile layout: 3 rows x 2 cols — compute tile height, then match chart
     tw = (stats_w - gap) / 2
@@ -1555,7 +1519,8 @@ def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
     sy = y + title_h
 
     _mini_stat_tile(pdf, stats_x, sy, tw, th,
-                    "Peak Hour", peak_range, None, TEAL)
+                    "Peak Hour", peak_label,
+                    f"{peak_count} occupied" if peak_count else None, TEAL)
     _mini_stat_tile(pdf, stats_x + tw + gap, sy, tw, th,
                     "Avg Occupancy", f"{avg_occ}%", None, BLUE)
 
