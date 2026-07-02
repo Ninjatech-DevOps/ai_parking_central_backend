@@ -1296,15 +1296,27 @@ def _fmt_hour_label(h: int) -> str:
     return f"{h - 12} PM"
 
 
-def _peak_hour_range(hourly: dict) -> str:
+def _fmt_hour_short(h: int) -> str:
+    """Compact hour: 10 -> '10A', 13 -> '1P'."""
+    if h == 0:
+        return "12A"
+    if h < 12:
+        return f"{h}A"
+    if h == 12:
+        return "12P"
+    return f"{h - 12}P"
+
+
+def _peak_hour_range(hourly: dict, compact: bool = False) -> str:
     """Compute peak hour display with range support.
 
     If multiple consecutive hours share the peak count, collapse into a range.
     Non-consecutive groups are comma-separated.
+    compact=True uses short format ('11A-3P') for tight spaces.
     Examples:
-      {10:5, 11:5, 12:3} -> '10 AM - 11 AM'
+      {10:5, 11:5, 12:3} -> '10 AM - 11 AM'  or  '10A-11A'
       {10:5, 11:5, 13:5, 14:5} -> '10 AM - 11 AM, 1 PM - 2 PM'
-      {10:5, 12:3} -> '10 AM'
+      {10:5, 12:3} -> '10 AM'  or  '10A'
       {} -> '-'
     """
     if not hourly:
@@ -1322,12 +1334,15 @@ def _peak_hour_range(hourly: dict) -> str:
         else:
             groups.append([h])
 
+    fmt = _fmt_hour_short if compact else _fmt_hour_label
+    sep = "-" if compact else " - "
+
     parts = []
     for g in groups:
         if len(g) == 1:
-            parts.append(_fmt_hour_label(g[0]))
+            parts.append(fmt(g[0]))
         else:
-            parts.append(f"{_fmt_hour_label(g[0])} - {_fmt_hour_label(g[-1])}")
+            parts.append(f"{fmt(g[0])}{sep}{fmt(g[-1])}")
     return ", ".join(parts)
 
 
@@ -1486,11 +1501,9 @@ def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
     # ── Right: Stats ──
     _txt(pdf, stats_x, y, stats_w, "Summary", size=8, style="B", color=SLATE_900, h=4)
 
-    # Compute stats from rows
+    # Compute stats from hourly data
     hourly_occ = {}  # hour -> total occupied
     all_occ_pcts = []
-    high_load_count = 0
-    total_scans = len(rows)
     max_cars = 0
     max_bikes = 0
 
@@ -1500,14 +1513,12 @@ def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
         cap = d.get("tot_car", 0) + d.get("tot_bike", 0)
         hourly_occ[h] = occ
         if cap > 0:
-            pct = round(occ / cap * 100)
-            all_occ_pcts.append(pct)
-            if pct >= 80:
-                high_load_count += 1
+            all_occ_pcts.append(round(occ / cap * 100))
         max_cars = max(max_cars, d.get("occ_car", 0))
         max_bikes = max(max_bikes, d.get("occ_bike", 0))
 
-    peak_range = _peak_hour_range(hourly_occ)
+    # Use compact format so "11A-3P" fits in tile
+    peak_range = _peak_hour_range(hourly_occ, compact=True)
     peak_val = max(hourly_occ.values()) if hourly_occ else 0
     peak_cap = 0
     if hourly_occ:
@@ -1518,6 +1529,7 @@ def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
                 break
 
     avg_occ = round(sum(all_occ_pcts) / len(all_occ_pcts)) if all_occ_pcts else 0
+    peak_occ_pct = max(all_occ_pcts) if all_occ_pcts else 0
 
     # Find lowest occupancy hour
     lowest_h = min(hourly_occ, key=hourly_occ.get) if hourly_occ else None
@@ -1537,11 +1549,11 @@ def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
 
     sy += th + gap
     _mini_stat_tile(pdf, stats_x, sy, tw, th,
-                    "Lowest", f"{_fmt_hour_label(lowest_h)}" if lowest_h is not None else "-",
+                    "Lowest", _fmt_hour_short(lowest_h) if lowest_h is not None else "-",
                     f"{lowest_val} occupied" if lowest_h is not None else None, EMERALD)
     _mini_stat_tile(pdf, stats_x + tw + gap, sy, tw, th,
-                    "High Load", f"{high_load_count}/{len(hourly_data)}",
-                    "hours >=80%", AMBER)
+                    "Peak Occ %", f"{peak_occ_pct}%",
+                    "highest reached", AMBER)
 
     sy += th + gap
     _mini_stat_tile(pdf, stats_x, sy, tw, th,

@@ -1,13 +1,10 @@
-"""Demo Report PDF — comprehensive visual report for 10 AM - 6 PM operating window.
+"""Demo Report PDF — tight 3-4 page visual report for 10 AM - 6 PM.
 
-Landscape layout.  Pages:
-  1. Cover + Executive Summary
-  2. AI Parking — Global (hourly occupancy, duration, sessions)
-  3–N. AI Parking — Per Location (closing snapshot, hourly chart)
-  N+1. ANPR — Global (entries/exits, vehicle split, hourly, top plates)
-  N+2. ANPR — Per Location (closing occupancy, session stats)
-  N+3. ANPR Sessions table
-  N+4. OCR Accuracy & Cross-Validation
+Landscape layout:
+  Page 1: Executive Dashboard — KPIs, closing snapshot, highlights, location comparison
+  Page 2: AI Parking Deep Dive — hourly chart, duration, vehicle split, top sessions
+  Page 3: ANPR Deep Dive — hourly chart, vehicle split, top plates, OCR stats, top sessions
+  Page 4: (only if >1 location) Location Comparison Tables
 """
 
 import io
@@ -20,24 +17,17 @@ from src.app.utils.export import (
     _txt,
     _section_title,
     _panel,
-    _kpi_card,
     _kpi_row,
     _split_bar,
     _mini_metrics,
-    _mini_stat,
     _vehicle_block,
     _hbar_list,
     _table,
     ACCENTS,
     TEAL, TEAL_600, TEAL_400, TEAL_200, TEAL_50,
     SLATE_900, SLATE_700, SLATE_500, SLATE_400, SLATE_300, SLATE_100, SLATE_50,
-    WHITE, EMERALD, RED, RED_400, AMBER, AMBER_400, BLUE, INDIGO, VIOLET, ORANGE,
+    EMERALD, RED, RED_400, AMBER, AMBER_400, BLUE, INDIGO, VIOLET,
 )
-
-# Softer accent colours for gradients
-TEAL_BG = (236, 254, 250)
-BLUE_BG = (239, 246, 255)
-VIOLET_BG = (245, 243, 255)
 
 
 def _fmt_hour(h):
@@ -75,578 +65,392 @@ def _fmt_minutes(m):
 
 
 def _pct(part, total):
-    if total <= 0:
-        return 0
-    return round(part / total * 100)
-
-
-def _ensure_space(pdf, needed, top=26):
-    """Add a new page if not enough vertical space remains."""
-    if pdf.get_y() + needed > pdf.h - 14:
-        pdf.add_page()
-        pdf.set_y(top)
+    return round(part / total * 100) if total > 0 else 0
 
 
 # ─────────────────────────────────────────────────────────────
-# Hourly bars — 10am-6pm only
+# Hourly bars — 10am-6pm only (compact, with value labels)
 # ─────────────────────────────────────────────────────────────
-def _hourly_bars_window(pdf, x, y, w, h, hourly_dict, color, op_start, op_end):
-    """Draw hourly bars for operating window only. hourly_dict: {hour: count}."""
+def _hourly_bars_window(pdf, x, y, w, h, hourly_dict, color, op_start, op_end, show_values=False):
     hours = list(range(op_start, op_end + 1))
     data = [hourly_dict.get(hh, 0) for hh in hours]
     mx = max(data) if data and max(data) > 0 else 1
     bw = w / max(len(data), 1)
-    pdf.set_fill_color(*color)
     for i, v in enumerate(data):
         bh = (v / mx) * h
+        # Color intensity based on value
+        ratio = v / mx if mx > 0 else 0
+        if ratio > 0.8:
+            pdf.set_fill_color(*color)
+        elif ratio > 0.4:
+            r, g, b = color
+            pdf.set_fill_color(r + 30, min(g + 40, 255), min(b + 40, 255))
+        else:
+            r, g, b = color
+            pdf.set_fill_color(min(r + 60, 255), min(g + 80, 255), min(b + 80, 255))
         if bh > 0.3:
-            pdf.rect(x + i * bw + 1, y + h - bh, bw * 0.72, bh, "F")
+            pdf.rect(x + i * bw + 0.8, y + h - bh, bw * 0.76, bh, "F")
+        if show_values and v > 0:
+            _txt(pdf, x + i * bw - 1, y + h - bh - 4, bw + 2, str(v), size=5, style="B", color=SLATE_700, align="C", h=3)
     pdf.set_draw_color(*SLATE_300)
+    pdf.set_line_width(0.15)
     pdf.line(x, y + h, x + w, y + h)
     for i, hh in enumerate(hours):
-        _txt(pdf, x + i * bw - 1, y + h + 0.5, bw + 2, _fmt_hour_short(hh), size=5, color=SLATE_400, align="C", h=3)
+        _txt(pdf, x + i * bw - 1, y + h + 0.5, bw + 2, _fmt_hour_short(hh), size=5.5, color=SLATE_400, align="C", h=3)
 
 
+# ─────────────────────────────────────────────────────────────
+# Occupancy timeline — color-coded by fill %
+# ─────────────────────────────────────────────────────────────
 def _occupancy_timeline(pdf, x, y, w, h, hourly_scans, op_start, op_end):
-    """Line-style occupancy chart from hourly scan snapshots."""
     hours = list(range(op_start, op_end + 1))
-    occ_values = [hs.get("total_occupied", 0) for hs in hourly_scans]
-    cap_values = [hs.get("total_capacity", 0) for hs in hourly_scans]
-    max_cap = max(cap_values) if cap_values and max(cap_values) > 0 else 1
-
+    occ = [hs.get("total_occupied", 0) for hs in hourly_scans]
+    cap = [hs.get("total_capacity", 0) for hs in hourly_scans]
+    max_cap = max(cap) if cap and max(cap) > 0 else 1
     bw = w / max(len(hours), 1)
 
-    # Draw capacity reference line (dashed, light)
-    cap_y = y + h - (max_cap / max_cap) * h  # always at top
+    # Capacity reference
     pdf.set_draw_color(*SLATE_300)
-    pdf.set_line_width(0.2)
-    pdf.dashed_line(x, cap_y, x + w, cap_y, dash_length=2, space_length=1.5)
-    _txt(pdf, x + w - 20, cap_y - 3.5, 20, f"Cap: {max_cap}", size=5, color=SLATE_400, align="R", h=3)
+    pdf.set_line_width(0.15)
+    pdf.dashed_line(x, y, x + w, y, dash_length=2, space_length=1.5)
+    _txt(pdf, x + w - 22, y - 3.5, 22, f"Capacity: {max_cap}", size=5, color=SLATE_400, align="R", h=3)
 
-    # Draw bars
-    for i, (occ, cap) in enumerate(zip(occ_values, cap_values)):
-        bh = (occ / max_cap) * h if max_cap > 0 else 0
-        pct = _pct(occ, cap)
-        if pct >= 90:
+    for i, (o, c) in enumerate(zip(occ, cap)):
+        bh = (o / max_cap) * h if max_cap > 0 else 0
+        p = _pct(o, c)
+        if p >= 90:
             pdf.set_fill_color(*RED_400)
-        elif pct >= 70:
+        elif p >= 70:
             pdf.set_fill_color(*AMBER_400)
-        else:
+        elif p >= 40:
             pdf.set_fill_color(*TEAL_400)
+        else:
+            pdf.set_fill_color(*TEAL_200)
         if bh > 0.3:
-            pdf.rect(x + i * bw + 1, y + h - bh, bw * 0.72, bh, "F")
-        # Value label on top of bar
-        if occ > 0:
-            _txt(pdf, x + i * bw - 1, y + h - bh - 4, bw + 2, str(occ), size=5, style="B", color=SLATE_700, align="C", h=3)
-
+            pdf.rect(x + i * bw + 0.8, y + h - bh, bw * 0.76, bh, "F")
+        if o > 0:
+            _txt(pdf, x + i * bw - 1, y + h - bh - 4, bw + 2, str(o), size=5, style="B", color=SLATE_700, align="C", h=3)
     pdf.set_draw_color(*SLATE_300)
     pdf.line(x, y + h, x + w, y + h)
     for i, hh in enumerate(hours):
-        _txt(pdf, x + i * bw - 1, y + h + 0.5, bw + 2, _fmt_hour_short(hh), size=5, color=SLATE_400, align="C", h=3)
+        _txt(pdf, x + i * bw - 1, y + h + 0.5, bw + 2, _fmt_hour_short(hh), size=5.5, color=SLATE_400, align="C", h=3)
+    # Legend
+    lx = x + w - 60
+    for lbl, clr in [("<40%", TEAL_200), ("40-70%", TEAL_400), ("70-90%", AMBER_400), (">90%", RED_400)]:
+        pdf.set_fill_color(*clr)
+        pdf.rect(lx, y + h + 5, 3, 3, "F")
+        _txt(pdf, lx + 4, y + h + 4.5, 12, lbl, size=4.5, color=SLATE_400, h=3)
+        lx += 15
 
 
 # ─────────────────────────────────────────────────────────────
-# Closing snapshot card
+# Duration breakdown — horizontal bar chart (compact)
 # ─────────────────────────────────────────────────────────────
-def _closing_card(pdf, x, y, w, snap, label="Closing Snapshot @ 6 PM"):
-    """Compact card showing the 6pm closing data."""
-    h = 36
-    pdf.set_draw_color(*SLATE_300)
-    pdf.set_fill_color(*WHITE)
-    pdf.rect(x, y, w, h, "FD")
-    # Top accent
-    pdf.set_fill_color(*TEAL)
-    pdf.rect(x, y, w, 1.4, "F")
-
-    _txt(pdf, x + 3, y + 2.5, w - 6, label, size=7, style="B", color=TEAL)
-
-    cw = (w - 8) / 4
-    cy = y + 10
+def _duration_bars(pdf, x, y, w, h, dur_dist):
     items = [
-        ("Car Occ", snap.get("car_occupied", 0), RED),
-        ("Car Avail", snap.get("car_available", 0), EMERALD),
-        ("2W Occ", snap.get("two_wheeler_occupied", 0), RED),
-        ("2W Avail", snap.get("two_wheeler_available", 0), EMERALD),
+        ("< 30 min", dur_dist.get("under_30m", 0), EMERALD),
+        ("30m - 1h", dur_dist.get("30m_to_1h", 0), TEAL_400),
+        ("1 - 2 hrs", dur_dist.get("1h_to_2h", 0), BLUE),
+        ("2 - 8 hrs", dur_dist.get("2h_to_8h", 0), AMBER_400),
+        ("> 8 hrs", dur_dist.get("over_8h", 0), RED_400),
     ]
-    for i, (lbl, val, color) in enumerate(items):
-        ix = x + 4 + i * cw
-        _txt(pdf, ix, cy, cw, str(val), size=14, style="B", color=color, align="C", h=7)
-        _txt(pdf, ix, cy + 8, cw, lbl, size=5.5, color=SLATE_400, align="C", h=3)
-
-    total_occ = snap.get("car_occupied", 0) + snap.get("two_wheeler_occupied", 0)
-    total_cap = snap.get("car_total", 0) + snap.get("two_wheeler_total", 0)
-    pct = _pct(total_occ, total_cap)
-    _txt(pdf, x + 3, y + h - 7, w - 6, f"Occupancy: {pct}% ({total_occ}/{total_cap})", size=6.5, style="B", color=TEAL, align="R", h=4)
-    return h
+    dmx = max([v for _, v, _ in items] + [1])
+    label_w = 22
+    val_w = 10
+    bar_w = w - label_w - val_w - 2
+    row_h = h / len(items)
+    for i, (lbl, v, color) in enumerate(items):
+        ry = y + i * row_h
+        _txt(pdf, x, ry, label_w, lbl, size=6, color=SLATE_500, align="R", h=row_h)
+        pdf.set_fill_color(*SLATE_100)
+        pdf.rect(x + label_w + 2, ry + (row_h - 5) / 2, bar_w, 5, "F")
+        if v > 0:
+            pdf.set_fill_color(*color)
+            pdf.rect(x + label_w + 2, ry + (row_h - 5) / 2, bar_w * (v / dmx), 5, "F")
+        _txt(pdf, x + label_w + bar_w + 3, ry, val_w, str(v), size=6.5, style="B", color=SLATE_700, align="L", h=row_h)
 
 
 # ─────────────────────────────────────────────────────────────
 # Main PDF generator
 # ─────────────────────────────────────────────────────────────
 def generate_demo_report_pdf(d: Dict[str, Any]) -> io.BytesIO:
-    """Render the comprehensive demo report PDF."""
     pdf = ParkingPDF("AI Parking & ANPR - Daily Operations Report", orientation="L")
     pdf.alias_nb_pages()
     pdf.set_auto_page_break(False)
     M = 10
     W = pdf.w - 2 * M
+    G = 5  # gap between panels
 
     g = d["global"]
     ps = g["parking_summary"]
     ans = g["anpr_summary"]
     ocr = g["ocr_stats"]
     locs = d["locations"]
-    op_start = d["op_start"]
-    op_end = d["op_end"]
+    op_s, op_e = d["op_start"], d["op_end"]
 
-    # ════════════════════════════════════════════════════════════
-    # PAGE 1: COVER + EXECUTIVE SUMMARY
-    # ════════════════════════════════════════════════════════════
-    pdf.add_page()
-
-    # Title block
-    _txt(pdf, M, 20, W, d["date"], size=9, color=SLATE_500)
-    _txt(pdf, M, 25, W, f"Operating Hours: {d['operating_hours']}", size=8, style="B", color=TEAL)
-    _txt(pdf, M + W - 60, 20, 60, f"{g['total_locations']} Locations | {g['total_capacity']} Total Slots", size=8, color=SLATE_400, align="R")
-
-    y = _section_title(pdf, M, 32, "Executive Summary") + 1
-
-    # Hero KPIs
-    total_occ = sum(loc["closing_snapshot"].get("car_occupied", 0) + loc["closing_snapshot"].get("two_wheeler_occupied", 0) for loc in locs)
+    # Aggregate closing data
+    all_c = {k: sum(loc["closing_snapshot"].get(k, 0) for loc in locs)
+             for k in ["car_occupied", "car_available", "car_total",
+                        "two_wheeler_occupied", "two_wheeler_available", "two_wheeler_total"]}
+    total_occ = all_c["car_occupied"] + all_c["two_wheeler_occupied"]
     total_cap = g["total_capacity"]
-    kpis = [
-        ("Locations", g["total_locations"], "", "teal"),
-        ("Total Capacity", total_cap, f"{g['slot_counts']['available']} available", "blue"),
-        ("Closing Occupancy", f"{_pct(total_occ, total_cap)}%", f"{total_occ} vehicles @ 6 PM", "violet"),
-        ("Parking Sessions", ps["total_sessions"], f"{ps['active_sessions']} active", "indigo"),
-        ("ANPR Entries", ans["entries"], f"{ans['exits']} exits", "amber"),
-        ("Unique Plates", ans["unique_plates"], "detected today", "orange"),
-        ("Devices Online", f"{g['device_summary']['online']}/{g['device_summary']['total']}", "", "teal"),
-    ]
-    y = _kpi_row(pdf, M, y, W, kpis) + 5
+    total_car_in = sum(loc["anpr_closing"].get("car_inside", 0) for loc in locs)
+    total_tw_in = sum(loc["anpr_closing"].get("tw_inside", 0) for loc in locs)
 
-    # Closing snapshot — all locations combined
-    all_closing = {
-        "car_occupied": sum(loc["closing_snapshot"].get("car_occupied", 0) for loc in locs),
-        "car_available": sum(loc["closing_snapshot"].get("car_available", 0) for loc in locs),
-        "car_total": sum(loc["closing_snapshot"].get("car_total", 0) for loc in locs),
-        "two_wheeler_occupied": sum(loc["closing_snapshot"].get("two_wheeler_occupied", 0) for loc in locs),
-        "two_wheeler_available": sum(loc["closing_snapshot"].get("two_wheeler_available", 0) for loc in locs),
-        "two_wheeler_total": sum(loc["closing_snapshot"].get("two_wheeler_total", 0) for loc in locs),
-    }
-
-    pw = (W - 6) / 2
-    # Left: AI Parking closing
-    _panel(pdf, M, y, pw, 42, "AI Parking - Closing Snapshot @ 6 PM")
-    _split_bar(pdf, M + 4, y + 11, pw - 8, 6, [
-        (all_closing["car_occupied"] + all_closing["two_wheeler_occupied"], RED_400),
-        (all_closing["car_available"] + all_closing["two_wheeler_available"], EMERALD),
-    ])
-    _mini_metrics(pdf, M + 4, y + 26, pw - 8, [
-        ("Total", all_closing["car_total"] + all_closing["two_wheeler_total"], SLATE_900),
-        ("Occupied", all_closing["car_occupied"] + all_closing["two_wheeler_occupied"], RED),
-        ("Available", all_closing["car_available"] + all_closing["two_wheeler_available"], EMERALD),
-        ("Cars", all_closing["car_occupied"], BLUE),
-        ("2-Wheelers", all_closing["two_wheeler_occupied"], INDIGO),
-    ])
-
-    # Right: ANPR closing
-    ax = M + pw + 6
-    _panel(pdf, ax, y, pw, 42, "ANPR - Vehicles Inside @ 6 PM")
-    total_car_inside = sum(loc["anpr_closing"].get("car_inside", 0) for loc in locs)
-    total_tw_inside = sum(loc["anpr_closing"].get("tw_inside", 0) for loc in locs)
-    total_anpr_cap = sum(loc["anpr_closing"].get("car_total", 0) + loc["anpr_closing"].get("tw_total", 0) for loc in locs)
-    vbw = (pw - 12) / 2
-    _vehicle_block(pdf, ax + 4, y + 11, vbw, "Cars",
-                   total_car_inside,
-                   max(0, sum(loc["anpr_closing"].get("car_total", 0) for loc in locs) - total_car_inside),
-                   sum(loc["anpr_closing"].get("car_total", 0) for loc in locs), BLUE)
-    _vehicle_block(pdf, ax + 8 + vbw, y + 11, vbw, "2-Wheeler",
-                   total_tw_inside,
-                   max(0, sum(loc["anpr_closing"].get("tw_total", 0) for loc in locs) - total_tw_inside),
-                   sum(loc["anpr_closing"].get("tw_total", 0) for loc in locs), INDIGO)
-    y += 42 + 5
-
-    # Highlights strip
-    highlights = [
-        ("Peak Parking Hour", _fmt_hour(ps["peak_hour"])),
-        ("Avg Park Duration", _fmt_minutes(ps["avg_duration_minutes"])),
-        ("Peak ANPR Hour", _fmt_hour(ans["peak_hour"])),
-        ("ANPR Avg Duration", _fmt_minutes(ans["avg_dur"])),
-        ("Vehicles Inside (ANPR)", total_car_inside + total_tw_inside),
-        ("OCR Match Rate", f"{ocr['dual_match_rate']}%" if ocr["dual_match_rate"] is not None else "-"),
-    ]
-    n = len(highlights)
-    gap = 3
-    cw = (W - (n - 1) * gap) / n
-    for i, (lbl, val) in enumerate(highlights):
-        _mini_stat(pdf, M + i * (cw + gap), y, cw, 12, lbl, val)
-
-    # ════════════════════════════════════════════════════════════
-    # PAGE 2: AI PARKING — GLOBAL
-    # ════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════
+    # PAGE 1: EXECUTIVE DASHBOARD
+    # ═══════════════════════════════════════════════════════════
     pdf.add_page()
-    y = _section_title(pdf, M, 24, "AI Parking - Day Activity (10 AM - 6 PM)")
-    stats = [
+
+    # Header stripe
+    pdf.set_fill_color(*TEAL)
+    pdf.rect(M, 17, W, 0.8, "F")
+    _txt(pdf, M, 19, W * 0.6, d["date"], size=8, color=SLATE_500)
+    _txt(pdf, M, 23, W * 0.6, f"Operating Window: {d['operating_hours']}", size=7, style="B", color=TEAL)
+    _txt(pdf, M, 19, W, f"{g['total_locations']} Locations  |  {total_cap} Total Slots  |  {g['device_summary']['online']}/{g['device_summary']['total']} Devices Online", size=7, color=SLATE_400, align="R")
+
+    y = 30
+
+    # Hero KPIs — 2 rows
+    row1 = [
+        ("Closing Occupancy", f"{_pct(total_occ, total_cap)}%", f"{total_occ}/{total_cap} slots", "teal"),
+        ("Parking Sessions", ps["total_sessions"], f"{ps['completed_sessions']} completed", "blue"),
+        ("Avg Park Duration", _fmt_minutes(ps["avg_duration_minutes"]), f"peak @ {_fmt_hour(ps['peak_hour'])}", "violet"),
+        ("ANPR Entries", ans["entries"], f"{ans['exits']} exits", "indigo"),
+        ("Vehicles Inside", total_car_in + total_tw_in, "ANPR @ 6 PM", "amber"),
+        ("Unique Plates", ans["unique_plates"], "detected today", "orange"),
+    ]
+    y = _kpi_row(pdf, M, y, W, row1, h=24) + G
+
+    # Two panels side by side
+    pw = (W - G) / 2
+
+    # Left: AI Parking Closing @ 6 PM
+    ph1 = 44
+    _panel(pdf, M, y, pw, ph1, "AI Parking - Closing @ 6 PM")
+    _split_bar(pdf, M + 4, y + 11, pw - 8, 6, [
+        (all_c["car_occupied"] + all_c["two_wheeler_occupied"], RED_400),
+        (all_c["car_available"] + all_c["two_wheeler_available"], EMERALD),
+    ])
+    _mini_metrics(pdf, M + 4, y + 25, pw - 8, [
+        ("Cars Occ", all_c["car_occupied"], RED),
+        ("Cars Avail", all_c["car_available"], EMERALD),
+        ("2W Occ", all_c["two_wheeler_occupied"], RED),
+        ("2W Avail", all_c["two_wheeler_available"], EMERALD),
+        ("Total", all_c["car_total"] + all_c["two_wheeler_total"], SLATE_900),
+    ])
+
+    # Right: ANPR Closing @ 6 PM
+    ax = M + pw + G
+    _panel(pdf, ax, y, pw, ph1, "ANPR - Vehicles Inside @ 6 PM")
+    vbw = (pw - 12) / 2
+    _vehicle_block(pdf, ax + 4, y + 11, vbw, "Cars", total_car_in,
+                   max(0, sum(l["anpr_closing"].get("car_total", 0) for l in locs) - total_car_in),
+                   sum(l["anpr_closing"].get("car_total", 0) for l in locs), BLUE)
+    _vehicle_block(pdf, ax + 8 + vbw, y + 11, vbw, "2-Wheeler", total_tw_in,
+                   max(0, sum(l["anpr_closing"].get("tw_total", 0) for l in locs) - total_tw_in),
+                   sum(l["anpr_closing"].get("tw_total", 0) for l in locs), INDIGO)
+    y += ph1 + G
+
+    # Occupancy timeline (full width)
+    tl_h = 48
+    _panel(pdf, M, y, W, tl_h + 8, "Occupancy Throughout The Day (10 AM - 6 PM)")
+    # Merge all location hourly scans into combined
+    combined_hourly = []
+    for h_idx in range(op_e - op_s + 1):
+        to = sum(loc["hourly_scans"][h_idx].get("total_occupied", 0) for loc in locs if h_idx < len(loc["hourly_scans"]))
+        tc = sum(loc["hourly_scans"][h_idx].get("total_capacity", 0) for loc in locs if h_idx < len(loc["hourly_scans"]))
+        combined_hourly.append({"total_occupied": to, "total_capacity": tc})
+    _occupancy_timeline(pdf, M + 4, y + 10, W - 8, tl_h - 10, combined_hourly, op_s, op_e)
+
+    # ═══════════════════════════════════════════════════════════
+    # PAGE 2: AI PARKING DEEP DIVE
+    # ═══════════════════════════════════════════════════════════
+    pdf.add_page()
+    y = _section_title(pdf, M, 24, "AI Parking - Analysis (10 AM - 6 PM)")
+
+    # KPI strip
+    p_stats = [
         ("Total Sessions", ps["total_sessions"], "", "teal"),
         ("Active @ Close", ps["active_sessions"], "", "red"),
         ("Completed", ps["completed_sessions"], "", "teal"),
         ("Avg Duration", _fmt_minutes(ps["avg_duration_minutes"]), "", "violet"),
-        ("Peak Hour", _fmt_hour(ps["peak_hour"]), f"{ps['peak_hour_count']} entries" if ps["peak_hour_count"] else "", "amber"),
+        ("Min Duration", _fmt_minutes(ps["min_duration_minutes"]), "", "blue"),
+        ("Max Duration", _fmt_minutes(ps["max_duration_minutes"]), "", "orange"),
         ("Cars", ps["car_sessions"], "", "blue"),
         ("2-Wheelers", ps["two_wheeler_sessions"], "", "indigo"),
-        ("Obstructed", ps["obstructed_sessions"], "", "orange"),
     ]
-    y = _kpi_row(pdf, M, y, W, stats, h=22) + 5
+    y = _kpi_row(pdf, M, y, W, p_stats, h=20) + G
 
-    lpw = W * 0.58
-    rpw = W - lpw - 6
-    ph = 48
+    # Row: hourly + duration + vehicle split (3 panels)
+    w1 = W * 0.42
+    w2 = W * 0.28
+    w3 = W - w1 - w2 - 2 * G
+    ph = 50
 
-    _panel(pdf, M, y, lpw, ph, "Hourly Parking Activity (10 AM - 6 PM)")
-    _hourly_bars_window(pdf, M + 4, y + 9, lpw - 8, ph - 16, ps["hourly_distribution"], TEAL, op_start, op_end)
+    _panel(pdf, M, y, w1, ph, "Hourly Parking Sessions")
+    _hourly_bars_window(pdf, M + 4, y + 10, w1 - 8, ph - 18, ps["hourly_distribution"], TEAL, op_s, op_e, show_values=True)
 
-    _panel(pdf, M + lpw + 6, y, rpw, ph, "Duration Breakdown")
-    dur = ps["duration_distribution"]
-    dur_items = [
-        ("< 30 min", dur.get("under_30m", 0), EMERALD), ("30m-1h", dur.get("30m_to_1h", 0), TEAL_400),
-        ("1-2 h", dur.get("1h_to_2h", 0), BLUE), ("2-8 h", dur.get("2h_to_8h", 0), AMBER_400),
-        ("> 8 h", dur.get("over_8h", 0), RED_400),
-    ]
-    dmx = max([v for _, v, _ in dur_items] + [1])
-    rx = M + lpw + 6 + 4
-    bar_x = rx + 22
-    bar_w = rpw - 8 - 22 - 12
-    dy = y + 11
-    for lbl, v, color in dur_items:
-        _txt(pdf, rx, dy, 20, lbl, size=6, color=SLATE_500, align="R", h=5)
-        pdf.set_fill_color(*SLATE_100)
-        pdf.rect(bar_x, dy + 0.5, bar_w, 4.5, "F")
-        pdf.set_fill_color(*color)
-        pdf.rect(bar_x, dy + 0.5, bar_w * (v / dmx), 4.5, "F")
-        _txt(pdf, bar_x + bar_w + 1, dy, 10, str(v), size=6, style="B", color=SLATE_500, align="L", h=5)
-        dy += 6.5
-    y += ph + 5
+    _panel(pdf, M + w1 + G, y, w2, ph, "Duration Breakdown")
+    _duration_bars(pdf, M + w1 + G + 2, y + 10, w2 - 4, ph - 14, ps["duration_distribution"])
 
-    # Slot status + sessions table
+    _panel(pdf, M + w1 + w2 + 2 * G, y, w3, ph, "Vehicle Split & Slots")
+    vx = M + w1 + w2 + 2 * G + 4
+    vw = w3 - 8
+    # Vehicle split bar
+    veh_tot = (ps["car_sessions"] + ps["two_wheeler_sessions"]) or 1
+    _split_bar(pdf, vx, y + 11, vw, 5, [(ps["car_sessions"], BLUE), (ps["two_wheeler_sessions"], INDIGO)])
+    _txt(pdf, vx, y + 22, vw / 2, f"{_pct(ps['car_sessions'], veh_tot)}% Cars ({ps['car_sessions']})", size=6.5, style="B", color=BLUE, align="C")
+    _txt(pdf, vx + vw / 2, y + 22, vw / 2, f"{_pct(ps['two_wheeler_sessions'], veh_tot)}% 2W ({ps['two_wheeler_sessions']})", size=6.5, style="B", color=INDIGO, align="C")
+    # Slot counts
     sc = g["slot_counts"]
-    _panel(pdf, M, y, W * 0.35, 22, "Current Slot Status")
-    _mini_metrics(pdf, M + 4, y + 9, W * 0.35 - 8, [
-        ("Total", sc["total"], SLATE_900),
+    _txt(pdf, vx, y + 30, vw, "Current Slot Status", size=6.5, style="B", color=SLATE_500)
+    _mini_metrics(pdf, vx, y + 36, vw, [
         ("Occupied", sc["occupied"], RED),
         ("Available", sc["available"], EMERALD),
         ("Obstructed", sc["obstructed"], AMBER),
     ])
+    y += ph + G
 
-    dev = g["device_summary"]
-    _panel(pdf, M + W * 0.35 + 6, y, W * 0.25, 22, "Device Health")
-    _mini_metrics(pdf, M + W * 0.35 + 10, y + 9, W * 0.25 - 8, [
-        ("Total", dev["total"], SLATE_900),
-        ("Online", dev["online"], EMERALD),
-        ("Offline", dev["offline"], RED),
-    ])
-
-    veh_total = (ps["car_sessions"] + ps["two_wheeler_sessions"]) or 1
-    _panel(pdf, M + W * 0.60 + 12, y, W * 0.40 - 12, 22, "Vehicle Type Split")
-    _split_bar(pdf, M + W * 0.60 + 16, y + 10, W * 0.40 - 20, 5, [
-        (ps["car_sessions"], BLUE), (ps["two_wheeler_sessions"], INDIGO),
-    ])
-    y += 22 + 6
-
-    # Parking sessions table
+    # Top parking sessions table (compact, max 20 rows)
     if d["parking_sessions"]:
-        _txt(pdf, M, y, W, f"Parking Sessions ({len(d['parking_sessions'])} shown)", size=9, style="B", color=SLATE_900, h=6)
-        pdf.set_y(y + 6)
-        ps_headers = ["Slot", "Location", "Type", "Vehicle", "Entry", "Exit", "Duration", "Status"]
-        ps_widths = [22, 52, 22, 24, 42, 42, 24, 22]  # sum = 250
-        ps_rows = [[s["slot_label"], s["location_name"], s["type"], s["vehicle"], s["entry"], s["exit"], s["duration"], s["status"]] for s in d["parking_sessions"]]
-        _table(pdf, M, ps_headers, ps_rows, ps_widths, max_rows=60)
+        _txt(pdf, M, y, W, f"Recent Parking Sessions (top {min(len(d['parking_sessions']), 20)})", size=8, style="B", color=SLATE_900, h=5)
+        pdf.set_y(y + 5.5)
+        ps_h = ["#", "Slot", "Location", "Type", "Vehicle", "Entry", "Exit", "Duration", "Status"]
+        ps_w = [10, 22, 52, 20, 22, 44, 44, 22, 20]
+        ps_rows = [[str(i + 1), s["slot_label"], s["location_name"], s["type"], s["vehicle"], s["entry"], s["exit"], s["duration"], s["status"]] for i, s in enumerate(d["parking_sessions"][:20])]
+        _table(pdf, M, ps_h, ps_rows, ps_w, max_rows=20)
 
-    # ════════════════════════════════════════════════════════════
-    # PER-LOCATION: AI PARKING
-    # ════════════════════════════════════════════════════════════
-    for loc in locs:
-        pdf.add_page()
-        y = _section_title(pdf, M, 24, f"AI Parking - {loc['name']}")
-        if loc["address"]:
-            _txt(pdf, M, y - 2, W, loc["address"], size=7, color=SLATE_400)
-            y += 4
-        _txt(pdf, M, y - 2, W, f"Capacity: {loc['car_capacity']} cars + {loc['tw_capacity']} two-wheelers = {loc['total_capacity']} total", size=7, style="B", color=SLATE_500)
-        y += 6
-
-        # Closing snapshot card
-        ch = _closing_card(pdf, M, y, W * 0.42, loc["closing_snapshot"])
-
-        # Location stats (right)
-        ls = loc["parking_summary"]
-        stat_x = M + W * 0.42 + 6
-        stat_w = W - W * 0.42 - 6
-        loc_stats = [
-            ("Sessions", ls["total_sessions"], "", "teal"),
-            ("Active", ls["active_sessions"], "", "red"),
-            ("Completed", ls["completed_sessions"], "", "teal"),
-            ("Avg Dur", _fmt_minutes(ls["avg_duration_minutes"]), "", "violet"),
-        ]
-        _kpi_row(pdf, stat_x, y, stat_w, loc_stats, h=16)
-
-        # Second row of stats
-        loc_stats2 = [
-            ("Peak Hour", _fmt_hour(ls["peak_hour"]), "", "amber"),
-            ("Cars", ls["car_sessions"], "", "blue"),
-            ("2-Wheelers", ls["two_wheeler_sessions"], "", "indigo"),
-            ("Obstructed", ls["obstructed_sessions"], "", "orange"),
-        ]
-        _kpi_row(pdf, stat_x, y + 19, stat_w, loc_stats2, h=16)
-        y += max(ch, 35) + 5
-
-        # Hourly occupancy timeline
-        ph = 48
-        _panel(pdf, M, y, W, ph, f"Occupancy Timeline - {loc['name']} (10 AM - 6 PM)")
-        _occupancy_timeline(pdf, M + 4, y + 9, W - 8, ph - 16, loc["hourly_scans"], op_start, op_end)
-        y += ph + 5
-
-        # Hourly parking activity
-        _panel(pdf, M, y, W * 0.55, 42, "Hourly Parking Sessions")
-        _hourly_bars_window(pdf, M + 4, y + 9, W * 0.55 - 8, 42 - 16, ls["hourly_distribution"], TEAL, op_start, op_end)
-
-        # Duration breakdown
-        dur = ls["duration_distribution"]
-        _panel(pdf, M + W * 0.55 + 6, y, W * 0.45 - 6, 42, "Duration Breakdown")
-        dur_items = [
-            ("< 30 min", dur.get("under_30m", 0), EMERALD), ("30m-1h", dur.get("30m_to_1h", 0), TEAL_400),
-            ("1-2 h", dur.get("1h_to_2h", 0), BLUE), ("2-8 h", dur.get("2h_to_8h", 0), AMBER_400),
-            ("> 8 h", dur.get("over_8h", 0), RED_400),
-        ]
-        dmx = max([v for _, v, _ in dur_items] + [1])
-        lrx = M + W * 0.55 + 10
-        lbar_x = lrx + 22
-        lbar_w = W * 0.45 - 14 - 22 - 12
-        ldy = y + 10
-        for lbl, v, color in dur_items:
-            _txt(pdf, lrx, ldy, 20, lbl, size=6, color=SLATE_500, align="R", h=5)
-            pdf.set_fill_color(*SLATE_100)
-            pdf.rect(lbar_x, ldy + 0.5, lbar_w, 4.5, "F")
-            pdf.set_fill_color(*color)
-            pdf.rect(lbar_x, ldy + 0.5, lbar_w * (v / dmx), 4.5, "F")
-            _txt(pdf, lbar_x + lbar_w + 1, ldy, 10, str(v), size=6, style="B", color=SLATE_500, align="L", h=5)
-            ldy += 5.8
-
-    # ════════════════════════════════════════════════════════════
-    # ANPR — GLOBAL
-    # ════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════
+    # PAGE 3: ANPR DEEP DIVE
+    # ═══════════════════════════════════════════════════════════
     pdf.add_page()
-    y = _section_title(pdf, M, 24, "ANPR - Day Activity (10 AM - 6 PM)")
-    anpr_kpis = [
+    y = _section_title(pdf, M, 24, "ANPR - Analysis (10 AM - 6 PM)")
+
+    a_stats = [
         ("Entries", ans["entries"], "", "violet"),
         ("Exits", ans["exits"], "", "blue"),
-        ("Inside Now", ans["inside"], "", "indigo"),
+        ("Inside @ 6 PM", ans["inside"], "", "indigo"),
         ("Unique Plates", ans["unique_plates"], "", "teal"),
         ("Cars", ans["cars"], "", "blue"),
         ("2-Wheelers", ans["two_wheelers"], "", "indigo"),
         ("Avg Duration", _fmt_minutes(ans["avg_dur"]), "", "amber"),
         ("Longest Stay", _fmt_minutes(ans["max_dur"]), "", "orange"),
     ]
-    y = _kpi_row(pdf, M, y, W, anpr_kpis, h=22) + 5
+    y = _kpi_row(pdf, M, y, W, a_stats, h=20) + G
 
-    lpw = W * 0.4
-    rpw = W - lpw - 6
-    ph = 44
+    # Row: hourly + vehicle split
+    w_left = W * 0.55
+    w_right = W - w_left - G
+    ph = 48
 
-    _panel(pdf, M, y, lpw, ph, "Vehicle Type Split")
-    _split_bar(pdf, M + 4, y + 11, lpw - 8, 6, [(ans["cars"], BLUE), (ans["two_wheelers"], INDIGO)])
+    _panel(pdf, M, y, w_left, ph, "Hourly Entry Pattern (10 AM - 6 PM)")
+    _hourly_bars_window(pdf, M + 4, y + 10, w_left - 8, ph - 18, ans["hourly"], VIOLET, op_s, op_e, show_values=True)
+
+    _panel(pdf, M + w_left + G, y, w_right, ph, "Vehicle Type Split")
     tot_v = (ans["cars"] + ans["two_wheelers"]) or 1
-    _txt(pdf, M + 4, y + 24, (lpw - 8) / 2, f"{_pct(ans['cars'], tot_v)}%  {ans['cars']} cars", size=8, style="B", color=BLUE, align="C")
-    _txt(pdf, M + 4 + (lpw - 8) / 2, y + 24, (lpw - 8) / 2, f"{_pct(ans['two_wheelers'], tot_v)}%  {ans['two_wheelers']} 2W", size=8, style="B", color=INDIGO, align="C")
+    _split_bar(pdf, M + w_left + G + 4, y + 11, w_right - 8, 6, [(ans["cars"], BLUE), (ans["two_wheelers"], INDIGO)])
+    _txt(pdf, M + w_left + G + 4, y + 23, (w_right - 8) / 2, f"{_pct(ans['cars'], tot_v)}%", size=14, style="B", color=BLUE, align="C", h=7)
+    _txt(pdf, M + w_left + G + 4 + (w_right - 8) / 2, y + 23, (w_right - 8) / 2, f"{_pct(ans['two_wheelers'], tot_v)}%", size=14, style="B", color=INDIGO, align="C", h=7)
+    _txt(pdf, M + w_left + G + 4, y + 31, (w_right - 8) / 2, f"{ans['cars']} Cars", size=7, color=SLATE_500, align="C")
+    _txt(pdf, M + w_left + G + 4 + (w_right - 8) / 2, y + 31, (w_right - 8) / 2, f"{ans['two_wheelers']} Two-Wheelers", size=7, color=SLATE_500, align="C")
 
-    _panel(pdf, M + lpw + 6, y, rpw, ph, "Hourly Entry Pattern (10 AM - 6 PM)")
-    _hourly_bars_window(pdf, M + lpw + 10, y + 9, rpw - 8, ph - 16, ans["hourly"], VIOLET, op_start, op_end)
-    y += ph + 5
-
-    half = (W - 6) / 2
-    _panel(pdf, M, y, half, 38, "Top Frequent Plates")
-    _hbar_list(pdf, M + 4, y + 9, half - 8, ans["top_plates"][:5], VIOLET)
-    _panel(pdf, M + half + 6, y, half, 38, "Busiest Locations")
-    _hbar_list(pdf, M + half + 10, y + 9, half - 8, ans["top_locations"][:5], TEAL)
-    y += 38 + 5
-
-    # ANPR Duration breakdown
-    if ans.get("duration_distribution"):
-        adur = ans["duration_distribution"]
-        _panel(pdf, M, y, half, 38, "ANPR Duration Breakdown")
-        adur_items = [
-            ("< 30 min", adur.get("under_30m", 0), EMERALD), ("30m-1h", adur.get("30m_to_1h", 0), TEAL_400),
-            ("1-2 h", adur.get("1h_to_2h", 0), BLUE), ("2-8 h", adur.get("2h_to_8h", 0), AMBER_400),
-            ("> 8 h", adur.get("over_8h", 0), RED_400),
-        ]
-        admx = max([v for _, v, _ in adur_items] + [1])
-        arx = M + 4
-        abar_x = arx + 22
-        abar_w = half - 12 - 22 - 12
-        ady = y + 10
-        for lbl, v, color in adur_items:
-            _txt(pdf, arx, ady, 20, lbl, size=6, color=SLATE_500, align="R", h=5)
-            pdf.set_fill_color(*SLATE_100)
-            pdf.rect(abar_x, ady + 0.5, abar_w, 4.5, "F")
-            pdf.set_fill_color(*color)
-            pdf.rect(abar_x, ady + 0.5, abar_w * (v / admx), 4.5, "F")
-            _txt(pdf, abar_x + abar_w + 1, ady, 10, str(v), size=6, style="B", color=SLATE_500, align="L", h=5)
-            ady += 5.8
-
-    # OCR Accuracy panel
+    # OCR stats in the vehicle split panel (bottom)
     if ocr["total_reads"] > 0:
-        _panel(pdf, M + half + 6, y, half, 38, "OCR Accuracy & Verification")
-        ocr_y = y + 10
-        ocr_items = [
-            ("Total Reads", ocr["total_reads"]),
-            ("Gemini Avg", f"{ocr['gemini_avg']}%" if ocr["gemini_avg"] else "-"),
-            ("PaddleOCR Avg", f"{ocr['paddle_avg']}%" if ocr["paddle_avg"] else "-"),
-            ("Dual Match Rate", f"{ocr['dual_match_rate']}%" if ocr["dual_match_rate"] else "-"),
-            ("Plate Reads (IN)", ocr["in_count"]),
-            ("Plate Reads (OUT)", ocr["out_count"]),
-        ]
-        ocr_x = M + half + 10
-        ocr_cw = (half - 8) / 3
-        for i, (lbl, val) in enumerate(ocr_items):
-            row = i // 3
-            col = i % 3
-            _txt(pdf, ocr_x + col * ocr_cw, ocr_y + row * 12, ocr_cw, str(val), size=11, style="B", color=TEAL, align="C", h=6)
-            _txt(pdf, ocr_x + col * ocr_cw, ocr_y + row * 12 + 7, ocr_cw, lbl, size=5.5, color=SLATE_400, align="C", h=3)
+        ocr_y = y + 37
+        ox = M + w_left + G + 4
+        _txt(pdf, ox, ocr_y, w_right - 8, "OCR Verification", size=6, style="B", color=SLATE_500)
+        ocr_y += 4
+        ocr_cw = (w_right - 8) / 3
+        for i, (lbl, val) in enumerate([
+            ("Gemini", f"{ocr['gemini_avg']}%" if ocr["gemini_avg"] else "-"),
+            ("Paddle", f"{ocr['paddle_avg']}%" if ocr["paddle_avg"] else "-"),
+            ("Match", f"{ocr['dual_match_rate']}%" if ocr["dual_match_rate"] else "-"),
+        ]):
+            _txt(pdf, ox + i * ocr_cw, ocr_y, ocr_cw, str(val), size=8, style="B", color=TEAL, align="C", h=4)
+            _txt(pdf, ox + i * ocr_cw, ocr_y + 4.5, ocr_cw, lbl, size=5, color=SLATE_400, align="C", h=3)
+    y += ph + G
 
-    # ════════════════════════════════════════════════════════════
-    # PER-LOCATION: ANPR
-    # ════════════════════════════════════════════════════════════
-    for loc in locs:
-        pdf.add_page()
-        y = _section_title(pdf, M, 24, f"ANPR - {loc['name']}")
+    # Row: top plates + busiest locations + duration
+    w3a = W * 0.32
+    w3b = W * 0.32
+    w3c = W - w3a - w3b - 2 * G
+    ph2 = 38
 
-        la = loc["anpr_summary"]
-        ac = loc["anpr_closing"]
+    _panel(pdf, M, y, w3a, ph2, "Top Frequent Plates")
+    _hbar_list(pdf, M + 4, y + 9, w3a - 8, ans["top_plates"][:5], VIOLET)
 
-        # Closing ANPR snapshot
-        _panel(pdf, M, y, W * 0.4, 36, f"Vehicles Inside @ 6 PM")
-        vbw = (W * 0.4 - 12) / 2
-        _vehicle_block(pdf, M + 4, y + 11, vbw, "Cars",
-                       ac.get("car_inside", 0),
-                       max(0, ac.get("car_total", 0) - ac.get("car_inside", 0)),
-                       ac.get("car_total", 0), BLUE)
-        _vehicle_block(pdf, M + 8 + vbw, y + 11, vbw, "2-Wheeler",
-                       ac.get("tw_inside", 0),
-                       max(0, ac.get("tw_total", 0) - ac.get("tw_inside", 0)),
-                       ac.get("tw_total", 0), INDIGO)
+    _panel(pdf, M + w3a + G, y, w3b, ph2, "Busiest Locations")
+    _hbar_list(pdf, M + w3a + G + 4, y + 9, w3b - 8, ans["top_locations"][:5], TEAL)
 
-        # ANPR stats
-        stat_x = M + W * 0.4 + 6
-        stat_w = W - W * 0.4 - 6
-        anpr_loc_stats = [
-            ("Entries", la["entries"], "", "violet"),
-            ("Exits", la["exits"], "", "blue"),
-            ("Inside", la["inside"], "", "indigo"),
-            ("Unique Plates", la["unique_plates"], "", "teal"),
-        ]
-        _kpi_row(pdf, stat_x, y, stat_w, anpr_loc_stats, h=16)
+    _panel(pdf, M + w3a + w3b + 2 * G, y, w3c, ph2, "ANPR Duration Breakdown")
+    if ans.get("duration_distribution"):
+        _duration_bars(pdf, M + w3a + w3b + 2 * G + 2, y + 10, w3c - 4, ph2 - 14, ans["duration_distribution"])
+    y += ph2 + G
 
-        anpr_loc_stats2 = [
-            ("Cars", la["cars"], "", "blue"),
-            ("2-Wheelers", la["two_wheelers"], "", "indigo"),
-            ("Avg Duration", _fmt_minutes(la["avg_dur"]), "", "amber"),
-            ("Longest", _fmt_minutes(la["max_dur"]), "", "orange"),
-        ]
-        _kpi_row(pdf, stat_x, y + 19, stat_w, anpr_loc_stats2, h=16)
-        y += 38 + 5
-
-        # Hourly
-        _panel(pdf, M, y, W * 0.55, 42, "Hourly Entry Pattern")
-        _hourly_bars_window(pdf, M + 4, y + 9, W * 0.55 - 8, 42 - 16, la["hourly"], VIOLET, op_start, op_end)
-
-        # Top plates for this location
-        _panel(pdf, M + W * 0.55 + 6, y, W * 0.45 - 6, 42, "Top Plates")
-        _hbar_list(pdf, M + W * 0.55 + 10, y + 9, W * 0.45 - 14, la["top_plates"][:5], VIOLET)
-        y += 42 + 5
-
-        # Vehicle split
-        _panel(pdf, M, y, W * 0.4, 30, "Vehicle Split")
-        la_tot = (la["cars"] + la["two_wheelers"]) or 1
-        _split_bar(pdf, M + 4, y + 10, W * 0.4 - 8, 5, [(la["cars"], BLUE), (la["two_wheelers"], INDIGO)])
-        _txt(pdf, M + 4, y + 20, (W * 0.4 - 8) / 2, f"{_pct(la['cars'], la_tot)}% Cars", size=7, style="B", color=BLUE, align="C")
-        _txt(pdf, M + 4 + (W * 0.4 - 8) / 2, y + 20, (W * 0.4 - 8) / 2, f"{_pct(la['two_wheelers'], la_tot)}% 2W", size=7, style="B", color=INDIGO, align="C")
-
-        # Duration breakdown
-        if la.get("duration_distribution"):
-            ldur = la["duration_distribution"]
-            _panel(pdf, M + W * 0.4 + 6, y, W * 0.6 - 6, 30, "Duration Breakdown")
-            ldur_items = [
-                ("< 30m", ldur.get("under_30m", 0), EMERALD), ("30m-1h", ldur.get("30m_to_1h", 0), TEAL_400),
-                ("1-2h", ldur.get("1h_to_2h", 0), BLUE), ("2-8h", ldur.get("2h_to_8h", 0), AMBER_400),
-                ("> 8h", ldur.get("over_8h", 0), RED_400),
-            ]
-            ldmx = max([v for _, v, _ in ldur_items] + [1])
-            lrx2 = M + W * 0.4 + 10
-            lbar_x2 = lrx2 + 18
-            lbar_w2 = W * 0.6 - 14 - 18 - 12
-            ldy2 = y + 9
-            for lbl, v, color in ldur_items:
-                _txt(pdf, lrx2, ldy2, 16, lbl, size=5.5, color=SLATE_500, align="R", h=4)
-                pdf.set_fill_color(*SLATE_100)
-                pdf.rect(lbar_x2, ldy2 + 0.3, lbar_w2, 3.5, "F")
-                pdf.set_fill_color(*color)
-                pdf.rect(lbar_x2, ldy2 + 0.3, lbar_w2 * (v / ldmx), 3.5, "F")
-                _txt(pdf, lbar_x2 + lbar_w2 + 1, ldy2, 8, str(v), size=5.5, style="B", color=SLATE_500, align="L", h=4)
-                ldy2 += 4
-
-    # ════════════════════════════════════════════════════════════
-    # ANPR SESSIONS TABLE
-    # ════════════════════════════════════════════════════════════
+    # ANPR sessions table (compact)
     if d["anpr_sessions"]:
-        pdf.add_page()
-        _txt(pdf, M, 24, W, f"ANPR Sessions ({len(d['anpr_sessions'])} shown)", size=9, style="B", color=SLATE_900, h=6)
-        pdf.set_y(30)
-        as_headers = ["Number Plate", "Type", "Location", "Entry", "Exit", "Duration", "Status"]
-        as_widths = [40, 22, 64, 46, 46, 24, 18]
-        as_rows = [[s["plate"], s["type"], s["location"], s["entry"], s["exit"], s["duration"], s["status"]] for s in d["anpr_sessions"]]
-        _table(pdf, M, as_headers, as_rows, as_widths, max_rows=90)
+        _txt(pdf, M, y, W, f"Recent ANPR Sessions (top {min(len(d['anpr_sessions']), 15)})", size=8, style="B", color=SLATE_900, h=5)
+        pdf.set_y(y + 5.5)
+        as_h = ["#", "Plate", "Type", "Location", "Entry", "Exit", "Duration", "Status"]
+        as_w = [10, 34, 20, 56, 44, 44, 24, 18]
+        as_rows = [[str(i + 1), s["plate"], s["type"], s["location"], s["entry"], s["exit"], s["duration"], s["status"]] for i, s in enumerate(d["anpr_sessions"][:15])]
+        _table(pdf, M, as_h, as_rows, as_w, max_rows=15)
 
-    # ════════════════════════════════════════════════════════════
-    # LOCATION COMPARISON TABLE
-    # ════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════
+    # PAGE 4: LOCATION COMPARISON (only if >1 location)
+    # ═══════════════════════════════════════════════════════════
     if len(locs) > 1:
         pdf.add_page()
         y = _section_title(pdf, M, 24, "Location Comparison - Closing @ 6 PM")
 
-        _txt(pdf, M, y, W, "AI Parking", size=9, style="B", color=TEAL, h=6)
-        pdf.set_y(y + 6)
-        loc_headers = ["Location", "Car Occ", "Car Avail", "Car Total", "2W Occ", "2W Avail", "2W Total", "Total Occ", "Capacity", "Occ %"]
-        loc_widths = [56, 22, 22, 22, 22, 22, 22, 24, 24, 22]
-        loc_rows = []
+        # AI Parking comparison
+        _txt(pdf, M, y, W, "AI Parking - Slot Occupancy @ 6 PM", size=8, style="B", color=TEAL, h=5)
+        pdf.set_y(y + 5.5)
+        loc_h = ["Location", "Car Occ", "Car Avail", "Car Total", "2W Occ", "2W Avail", "2W Total", "Total Occ", "Capacity", "Occ %"]
+        loc_w = [56, 22, 22, 22, 22, 22, 22, 24, 24, 22]
+        loc_r = []
         for loc in locs:
             cs = loc["closing_snapshot"]
-            total_occ = cs.get("car_occupied", 0) + cs.get("two_wheeler_occupied", 0)
-            total_cap = cs.get("car_total", 0) + cs.get("two_wheeler_total", 0)
-            loc_rows.append([
-                loc["name"],
-                cs.get("car_occupied", 0), cs.get("car_available", 0), cs.get("car_total", 0),
-                cs.get("two_wheeler_occupied", 0), cs.get("two_wheeler_available", 0), cs.get("two_wheeler_total", 0),
-                total_occ, total_cap, f"{_pct(total_occ, total_cap)}%",
-            ])
-        _table(pdf, M, loc_headers, loc_rows, loc_widths, max_rows=50)
+            to = cs.get("car_occupied", 0) + cs.get("two_wheeler_occupied", 0)
+            tc = cs.get("car_total", 0) + cs.get("two_wheeler_total", 0)
+            loc_r.append([loc["name"], cs.get("car_occupied", 0), cs.get("car_available", 0), cs.get("car_total", 0),
+                          cs.get("two_wheeler_occupied", 0), cs.get("two_wheeler_available", 0), cs.get("two_wheeler_total", 0),
+                          to, tc, f"{_pct(to, tc)}%"])
+        _table(pdf, M, loc_h, loc_r, loc_w, max_rows=30)
 
         y = pdf.get_y() + 8
-        if y < pdf.h - 60:
-            _txt(pdf, M, y, W, "ANPR - Vehicles Inside @ 6 PM", size=9, style="B", color=VIOLET, h=6)
-            pdf.set_y(y + 6)
-            anpr_headers = ["Location", "Cars Inside", "Car Capacity", "2W Inside", "2W Capacity", "Total Inside", "Total Capacity", "Occupancy %"]
-            anpr_widths = [56, 28, 28, 28, 28, 30, 30, 28]
-            anpr_rows = []
+
+        # ANPR comparison
+        _txt(pdf, M, y, W, "ANPR - Vehicles Inside @ 6 PM", size=8, style="B", color=VIOLET, h=5)
+        pdf.set_y(y + 5.5)
+        ah = ["Location", "Cars Inside", "Car Cap", "2W Inside", "2W Cap", "Total Inside", "Total Cap", "Occ %"]
+        aw = [56, 28, 28, 28, 28, 30, 30, 28]
+        ar = []
+        for loc in locs:
+            ac = loc["anpr_closing"]
+            ti = ac.get("car_inside", 0) + ac.get("tw_inside", 0)
+            tc = ac.get("car_total", 0) + ac.get("tw_total", 0)
+            ar.append([loc["name"], ac.get("car_inside", 0), ac.get("car_total", 0),
+                        ac.get("tw_inside", 0), ac.get("tw_total", 0), ti, tc, f"{_pct(ti, tc)}%"])
+        _table(pdf, M, ah, ar, aw, max_rows=30)
+
+        y = pdf.get_y() + 8
+
+        # Per-location session summary
+        if y < pdf.h - 50:
+            _txt(pdf, M, y, W, "Per-Location Activity Summary (10 AM - 6 PM)", size=8, style="B", color=SLATE_900, h=5)
+            pdf.set_y(y + 5.5)
+            sh = ["Location", "Parking Sess", "Active", "Completed", "Avg Dur", "ANPR Entries", "ANPR Exits", "Plates", "ANPR Avg Dur"]
+            sw = [52, 26, 22, 26, 22, 28, 26, 22, 28]
+            sr = []
             for loc in locs:
-                ac = loc["anpr_closing"]
-                ti = ac.get("car_inside", 0) + ac.get("tw_inside", 0)
-                tc = ac.get("car_total", 0) + ac.get("tw_total", 0)
-                anpr_rows.append([
-                    loc["name"],
-                    ac.get("car_inside", 0), ac.get("car_total", 0),
-                    ac.get("tw_inside", 0), ac.get("tw_total", 0),
-                    ti, tc, f"{_pct(ti, tc)}%",
-                ])
-            _table(pdf, M, anpr_headers, anpr_rows, anpr_widths, max_rows=50)
+                lps = loc["parking_summary"]
+                la = loc["anpr_summary"]
+                sr.append([loc["name"], lps["total_sessions"], lps["active_sessions"], lps["completed_sessions"],
+                           _fmt_minutes(lps["avg_duration_minutes"]),
+                           la["entries"], la["exits"], la["unique_plates"], _fmt_minutes(la["avg_dur"])])
+            _table(pdf, M, sh, sr, sw, max_rows=30)
 
     output = io.BytesIO()
     pdf.output(output)
