@@ -28,6 +28,7 @@ from src.app.schemas.parking_scan import ParkingScanResponse
 from src.app.schemas.shared_link import PublicViewResponse
 from src.app.services.shared_link import SharedLinkService
 from src.app.services.anpr_analytics import session_revenue, build_anpr_report
+from src.app.services.parking_analytics import build_parking_report
 from src.app.utils.pagination import build_paginated_response, get_pagination_params
 
 router = APIRouter(prefix="/public", tags=["Public View"])
@@ -99,6 +100,8 @@ async def get_public_parking_history(
 @router.get("/view/{token}/parking-history/occupancy-summary")
 async def get_public_occupancy_summary(
     token: str,
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
     service: SharedLinkService = Depends(get_shared_link_service),
     db: AsyncSession = Depends(get_db),
 ):
@@ -110,6 +113,16 @@ async def get_public_occupancy_summary(
     scan_service = ParkingScanService(ParkingScanRepository(db))
     summary = await scan_service.current_occupancy_summary(location_ids=location_id_set or None)
 
+    # Report — windowed hourly occupancy (10 AM-6 PM) + summary stats, mirroring
+    # the AI Parking Occupancy PDF. Window defaults to today when unset.
+    start = _parse_date(start_date)
+    end = _parse_date(end_date)
+    report_items = await ParkingScanRepository(db).get_filtered(
+        0, 5000, location_ids=location_id_set or None,
+        start_date=start, end_date=end,
+    )
+    report = build_parking_report(report_items)
+
     return {
         "car_occupied": summary["car"]["occupied"],
         "car_available": summary["car"]["available"],
@@ -117,6 +130,7 @@ async def get_public_occupancy_summary(
         "two_wheeler_occupied": summary["bike"]["occupied"],
         "two_wheeler_available": summary["bike"]["available"],
         "two_wheeler_total": summary["bike"]["total"],
+        "report": report,
     }
 
 
