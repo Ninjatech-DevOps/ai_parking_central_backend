@@ -27,3 +27,6 @@ class AnprSessionResponse(BaseResponse):
     is_active: bool
     duration_display: Optional[str] = None
     location_name: Optional[str] = None
+    # Revenue (Rs) for the session — populated by the public shared-link view;
+    # "-" when the vehicle has not exited yet.
+    revenue: Optional[str] = None

@@ -27,6 +27,7 @@ from src.app.schemas.base import PaginatedResponse
 from src.app.schemas.parking_scan import ParkingScanResponse
 from src.app.schemas.shared_link import PublicViewResponse
 from src.app.services.shared_link import SharedLinkService
+from src.app.services.anpr_analytics import session_revenue, build_anpr_report
 from src.app.utils.pagination import build_paginated_response, get_pagination_params
 
 router = APIRouter(prefix="/public", tags=["Public View"])
@@ -210,6 +211,8 @@ async def get_public_anpr_sessions(
                 h = total_min // 60
                 m = total_min % 60
                 resp.duration_display = f"{h}h {m}m" if m else f"{h}h"
+        # Revenue (Rs) — realised only once the vehicle has exited.
+        resp.revenue = f"{session_revenue(session.entry_time, session.exit_time):,}" if session.exit_time else "-"
         response_items.append(resp)
 
     return build_paginated_response(response_items, total, page, limit)
@@ -218,6 +221,8 @@ async def get_public_anpr_sessions(
 @router.get("/view/{token}/anpr-dashboard")
 async def get_public_anpr_dashboard(
     token: str,
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
     service: SharedLinkService = Depends(get_shared_link_service),
     db: AsyncSession = Depends(get_db),
 ):
@@ -313,6 +318,16 @@ async def get_public_anpr_dashboard(
             "occupancy_pct": round((occupied / total * 100), 1) if total > 0 else 0,
         })
 
+    # ANPR report — windowed cards (Total/In/Out/Available + Occupancy %,
+    # Revenue Rs, Accuracy %) and charts (In/Out pattern + Duration breakdown),
+    # mirroring the ANPR Sessions PDF. Window defaults to today when unset.
+    start = _parse_date(start_date)
+    end = _parse_date(end_date)
+    report_items = await AnprSessionRepository(db).get_filtered(
+        0, 5000, location_ids=location_id_set, start_date=start, end_date=end,
+    )
+    report = await build_anpr_report(db, location_id_set, report_items, start, end)
+
     return {
         "summary": {
             "car_total": car_total,
@@ -324,4 +339,5 @@ async def get_public_anpr_dashboard(
             "obstructions": obstructions,
         },
         "locations": loc_result,
+        "report": report,
     }
