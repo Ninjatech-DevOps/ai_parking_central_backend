@@ -21,7 +21,7 @@ from src.app.schemas.base import MessageResponse, PaginatedResponse
 from src.app.services.anpr_session import AnprSessionService
 from src.app.services.anpr_analytics import (
     session_revenue, compact_duration, build_inout_chart,
-    duration_breakdown, anpr_occupancy_summary,
+    duration_breakdown, anpr_occupancy_summary, build_anpr_report,
 )
 from src.app.utils.export import generate_excel, generate_anpr_sessions_pdf
 from src.app.utils.pagination import build_paginated_response, get_pagination_params
@@ -90,6 +90,36 @@ async def list_sessions(
         response_items.append(resp)
 
     return build_paginated_response(response_items, total, page, limit)
+
+
+@router.get("/report")
+async def get_sessions_report(
+    area_id: Optional[uuid.UUID] = Query(None),
+    location_id: Optional[uuid.UUID] = Query(None),
+    number_plate: Optional[str] = Query(None),
+    vehicle_type: Optional[str] = Query(None),
+    is_active: Optional[bool] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    service: AnprSessionService = Depends(_get_service),
+    _: bool = Depends(PermissionChecker(Permission.ANPR_VIEW)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
+    db: AsyncSession = Depends(get_db),
+):
+    """Summary cards (Total/In/Out/Available + Occupancy %, Revenue Rs,
+    Accuracy %) and charts for the ANPR History page. Honors the same
+    Area / Location / date / plate / status filters as the sessions list."""
+    if location_id:
+        verify_location_in_scope(location_id, user_location_ids)
+    scoped_ids = await _resolve_scope(area_id, user_location_ids, db)
+    start = _parse_date(start_date)
+    end = _parse_date(end_date)
+
+    items = await service.get_filtered(
+        0, 5000, location_id, scoped_ids, number_plate, vehicle_type, is_active, start, end
+    )
+    loc_scope = {location_id} if location_id else scoped_ids
+    return await build_anpr_report(db, loc_scope, items, start, end)
 
 
 @router.patch("/{session_id}", response_model=AnprSessionResponse)
