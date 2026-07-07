@@ -52,12 +52,13 @@ def build_inout_chart(items, start, end, ist=IST) -> dict:
     """In/Out bars bucketed by ENTRY time, so the bar sums equal the cards:
     in[b] = entries in bucket b; out[b] = of those, how many have exited.
     Bucket size adapts to the window span: <=2h -> 15 min, <=26h -> hourly,
-    else daily. Default window (no filter) = today 00:00 -> now (IST).
+    else daily. Default window (no filter) = today 10 AM -> 6 PM (IST), so the
+    Hourly Entry Pattern shows the standard 10 AM ... 6 PM business hours.
     """
     if start is None:
-        start = (datetime.utcnow() + ist).replace(hour=0, minute=0, second=0, microsecond=0) - ist
+        start = (datetime.utcnow() + ist).replace(hour=10, minute=0, second=0, microsecond=0) - ist
     if end is None:
-        end = datetime.utcnow()
+        end = (datetime.utcnow() + ist).replace(hour=18, minute=0, second=0, microsecond=0) - ist
     # Work in IST so buckets/labels align to local hours (12am, 1am, ...).
     start_ist, end_ist = _naive(start) + ist, _naive(end) + ist
     if end_ist < start_ist:
@@ -69,6 +70,14 @@ def build_inout_chart(items, start, end, ist=IST) -> dict:
         t = start_ist.replace(minute=(start_ist.minute // 15) * 15, second=0, microsecond=0)
     elif span_h <= 26:
         step, gran = timedelta(hours=1), "hour"
+        # Clamp the hourly view to business hours 10 AM - 6 PM (IST): a full-day
+        # window still renders the standard 10 AM ... 6 PM pattern, while a
+        # narrower intra-day filter (e.g. 1-4 PM) is respected as chosen.
+        day = start_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+        c_start = max(start_ist, day + timedelta(hours=10))
+        c_end = min(end_ist, day + timedelta(hours=18))
+        if c_start <= c_end:
+            start_ist, end_ist = c_start, c_end
         t = start_ist.replace(minute=0, second=0, microsecond=0)
     else:
         step, gran = timedelta(days=1), "day"
