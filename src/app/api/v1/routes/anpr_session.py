@@ -274,9 +274,11 @@ async def export_sessions_pdf(
             rev_str = "-"
         rows.append({
             "snapshot_url": s.entry_image_url or "",
+            "exit_snapshot_url": s.exit_image_url or "",
             "location": s.location.name if s.location else "",
             "plate": s.number_plate or "N/A",
             "type": "Car" if is_car else "Two Wheeler",
+            "movement": "Exit" if s.exit_time else "Entry",
             "date": (s.entry_time + ist).strftime("%d %b %Y"),
             "in": (s.entry_time + ist).strftime("%I:%M %p"),
             "out_date": (s.exit_time + ist).strftime("%d %b %Y") if s.exit_time else "Still Parked",

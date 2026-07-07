@@ -1867,10 +1867,16 @@ def _thumb_table(pdf, columns, rows, top=14):
         for c in columns:
             wcol = c["width"]
             key = c["key"]
-            if key == "snapshot_url":
+            if c.get("image") or key == "snapshot_url":
+                url = r.get(key)
+                # Blank cell (no placeholder) when there's genuinely no image
+                # to show — e.g. the Exit photo of a still-parked vehicle.
+                if not url:
+                    cx += wcol
+                    continue
                 tx, ty = cx + 3, ry + 2
                 tw, th = wcol - 6, row_h - 4
-                img = _download_image(r.get(key))
+                img = _download_image(url)
                 drawn = False
                 if img:
                     try:
@@ -1889,8 +1895,15 @@ def _thumb_table(pdf, columns, rows, top=14):
             elif c.get("stack"):
                 # Two values stacked on two lines (e.g. Date over Time).
                 k1, k2 = c["stack"]
+                # Optionally colour the second line by its value (Entry/Exit
+                # movement → teal / amber); otherwise the muted default.
+                v2 = str(r.get(k2, ""))
+                if c.get("stack_color") == "movement":
+                    c2 = TEAL if v2 == "Entry" else (AMBER if v2 == "Exit" else SLATE_500)
+                else:
+                    c2 = SLATE_500
                 _txt(pdf, cx + 3, ry + 3.4, wcol - 4, str(r.get(k1, "")), size=8.5, style="B", color=SLATE_700, align="L", h=4)
-                _txt(pdf, cx + 3, ry + 8.4, wcol - 4, str(r.get(k2, "")), size=8, style="", color=SLATE_500, align="L", h=4)
+                _txt(pdf, cx + 3, ry + 8.4, wcol - 4, v2, size=8, style="B" if c.get("stack_color") == "movement" else "", color=c2, align="L", h=4)
             elif c.get("wrap"):
                 # Wrapped text (e.g. long Location names) — up to 3 lines.
                 lines = pdf._wrap_text(str(r.get(key, "") or "-"), wcol - 5, 7.5, "")[:3]
@@ -1992,7 +2005,7 @@ def generate_anpr_sessions_pdf(meta: dict, summary: dict, rows: list, analytics:
 
     meta: {title, location, status, show_location}
     summary: {car:{total,in,out,available}, bike:{...}, revenue, accuracy_pct}
-    rows: [{snapshot_url, plate, type, date, in, out_date, out_time, duration, revenue, status}]
+    rows: [{snapshot_url, exit_snapshot_url, plate, type, movement, date, in, out_date, out_time, duration, revenue, status}]
     analytics: {chart: {labels, in, out, granularity}}
     """
     analytics = analytics or {}
@@ -2064,30 +2077,33 @@ def generate_anpr_sessions_pdf(meta: dict, summary: dict, rows: list, analytics:
         _txt(pdf, M, y, W, f"Session records ({len(rows)})", size=10, style="B", color=SLATE_900, h=5)
         pdf.set_y(y + 6)
         if meta.get("show_location", False):
-            # All-locations report: Location + stacked In/Out + Duration + Revenue.
-            # ("Image" header for the thumbnail so it fits the narrow column.)
+            # All-locations report: Entry+Exit thumbnails, Location, stacked
+            # Type (vehicle over Entry/Exit) + In/Out + Duration + Revenue.
+            # (Short image headers so they fit the narrow columns.)
             columns = [
-                {"header": "Image", "width": 18, "key": "snapshot_url", "align": "L"},
-                {"header": "Location", "width": 24, "key": "location", "align": "L", "wrap": True},
-                {"header": "Plate", "width": 25, "key": "plate", "align": "L", "color": SLATE_900},
-                {"header": "Type", "width": 25, "key": "type", "align": "L"},
-                {"header": "In", "width": 24, "key": "date", "align": "L", "stack": ("date", "in")},
-                {"header": "Out", "width": 24, "key": "out_date", "align": "L", "stack": ("out_date", "out_time")},
-                {"header": "Duration", "width": 16, "key": "duration", "align": "C"},
-                {"header": "Status", "width": 16, "key": "status", "align": "C", "color": "status"},
+                {"header": "Entry", "width": 15, "key": "snapshot_url", "align": "L", "image": True},
+                {"header": "Exit", "width": 15, "key": "exit_snapshot_url", "align": "L", "image": True},
+                {"header": "Location", "width": 22, "key": "location", "align": "L", "wrap": True},
+                {"header": "Plate", "width": 26, "key": "plate", "align": "L", "color": SLATE_900},
+                {"header": "Type", "width": 22, "key": "type", "align": "L", "stack": ("type", "movement"), "stack_color": "movement"},
+                {"header": "In", "width": 22, "key": "date", "align": "L", "stack": ("date", "in")},
+                {"header": "Out", "width": 22, "key": "out_date", "align": "L", "stack": ("out_date", "out_time")},
+                {"header": "Duration", "width": 14, "key": "duration", "align": "C"},
+                {"header": "Status", "width": 14, "key": "status", "align": "C", "color": "status"},
                 {"header": "Revenue", "width": 18, "key": "revenue", "align": "R", "color": SLATE_900},
             ]
         else:
             # Single-location report: no Location column (it's in the subtitle).
             columns = [
-                {"header": "Snapshot", "width": 24, "key": "snapshot_url", "align": "L"},
-                {"header": "Plate", "width": 27, "key": "plate", "align": "L", "color": SLATE_900},
-                {"header": "Type", "width": 28, "key": "type", "align": "L"},
-                {"header": "In", "width": 26, "key": "date", "align": "L", "stack": ("date", "in")},
-                {"header": "Out", "width": 26, "key": "out_date", "align": "L", "stack": ("out_date", "out_time")},
-                {"header": "Duration", "width": 20, "key": "duration", "align": "C"},
-                {"header": "Status", "width": 20, "key": "status", "align": "C", "color": "status"},
-                {"header": "Revenue", "width": 19, "key": "revenue", "align": "R", "color": SLATE_900},
+                {"header": "Entry", "width": 18, "key": "snapshot_url", "align": "L", "image": True},
+                {"header": "Exit", "width": 18, "key": "exit_snapshot_url", "align": "L", "image": True},
+                {"header": "Plate", "width": 28, "key": "plate", "align": "L", "color": SLATE_900},
+                {"header": "Type", "width": 24, "key": "type", "align": "L", "stack": ("type", "movement"), "stack_color": "movement"},
+                {"header": "In", "width": 24, "key": "date", "align": "L", "stack": ("date", "in")},
+                {"header": "Out", "width": 24, "key": "out_date", "align": "L", "stack": ("out_date", "out_time")},
+                {"header": "Duration", "width": 16, "key": "duration", "align": "C"},
+                {"header": "Status", "width": 16, "key": "status", "align": "C", "color": "status"},
+                {"header": "Revenue", "width": 22, "key": "revenue", "align": "R", "color": SLATE_900},
             ]
         _thumb_table(pdf, columns, rows)
 
