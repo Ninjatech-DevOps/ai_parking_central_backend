@@ -910,6 +910,21 @@ def _draw_vehicle_icon(pdf, ix, cy, is_car, color, s=1.0):
         pdf.line(ix + 4.0 * s, cy - 0.6 * s, ix + 5.2 * s, cy - 0.8 * s)
 
 
+def _draw_image_fallback(pdf, x, y, w, h, is_car=True):
+    """Clean stand-in when a snapshot is missing: a soft rounded tile with a
+    muted vehicle icon (no 'No image' label — reads as intentional, not broken)."""
+    pdf.set_fill_color(*SLATE_50)
+    pdf.set_draw_color(*SLATE_300)
+    pdf.set_line_width(0.3)
+    try:
+        pdf.rect(x, y, w, h, "FD", round_corners=True, corner_radius=1.2)
+    except TypeError:
+        pdf.rect(x, y, w, h, "FD")
+    s = max(0.7, min(w, h) / 11.0)
+    ix = x + (w - 7 * s) / 2
+    _draw_vehicle_icon(pdf, ix, y + h / 2, is_car, SLATE_300, s=s)
+
+
 def _summary_card(pdf, x, y, w, h, title, accent, occupied, available, total):
     """Count card matching the UI: tinted card, centered title + icon, 3 divided columns."""
     pdf.set_fill_color(*_tint(accent, 0.93))
@@ -1869,14 +1884,12 @@ def _thumb_table(pdf, columns, rows, top=14):
             key = c["key"]
             if c.get("image") or key == "snapshot_url":
                 url = r.get(key)
-                # Blank cell (no placeholder) when there's genuinely no image
-                # to show — e.g. the Exit photo of a still-parked vehicle.
-                if not url:
-                    cx += wcol
-                    continue
                 tx, ty = cx + 3, ry + 2
                 tw, th = wcol - 6, row_h - 4
-                img = _download_image(url)
+                # Fall back to the base "No image" placeholder whenever there's
+                # no URL (e.g. the Exit photo of a still-parked vehicle) or the
+                # download fails.
+                img = _download_image(url) if url else None
                 drawn = False
                 if img:
                     try:
@@ -1891,7 +1904,8 @@ def _thumb_table(pdf, columns, rows, top=14):
                     except Exception:
                         drawn = False
                 if not drawn:
-                    pdf._draw_image_placeholder(tx, ty, tw, th)
+                    is_car = str(r.get("type", "")).strip().lower().startswith("car")
+                    _draw_image_fallback(pdf, tx, ty, tw, th, is_car)
             elif c.get("stack"):
                 # Two values stacked on two lines (e.g. Date over Time).
                 k1, k2 = c["stack"]
