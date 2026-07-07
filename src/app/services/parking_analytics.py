@@ -78,8 +78,8 @@ def build_occupancy_stats(rows: list, hourly: list) -> dict:
         bike_occ = r.get("occ_bike", 0)
         bike_cap = r.get("tot_bike", 0)
         # Peak = highest individual type %, so 7/7 cars = 100% even if 2W is 0/2.
-        car_pct = round(car_occ / car_cap * 100) if car_cap > 0 else 0
-        bike_pct = round(bike_occ / bike_cap * 100) if bike_cap > 0 else 0
+        car_pct = min(100, round(car_occ / car_cap * 100)) if car_cap > 0 else 0
+        bike_pct = min(100, round(bike_occ / bike_cap * 100)) if bike_cap > 0 else 0
         peak_occ_pct = max(peak_occ_pct, car_pct, bike_pct)
         max_cars = max(max_cars, car_occ)
         max_bikes = max(max_bikes, bike_occ)
