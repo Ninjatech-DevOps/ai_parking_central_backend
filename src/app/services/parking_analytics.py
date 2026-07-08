@@ -35,19 +35,29 @@ def _peak_hour_display(hourly: dict) -> tuple:
     return _fmt_hour_label(peak_h), peak_val
 
 
+def _is_5min_mark(scan) -> bool:
+    """Only accept scans at exact 5-minute marks (:00, :05, :10, … :55)."""
+    if not scan.recorded_at:
+        return False
+    t = scan.recorded_at + IST
+    return t.minute % 5 == 0
+
+
 def build_hourly_occupancy(items) -> list:
-    """Hourly occupancy (10 AM - 6 PM): the scan closest to each hour (within
-    30 min). ``items`` are ParkingScan ORM rows. Mirrors export_scans_pdf."""
+    """Hourly occupancy (10 AM - 6 PM): highest occupancy scan within each
+    hour, using only scans at exact 5-minute marks. ``items`` are ParkingScan
+    ORM rows."""
+    valid = [s for s in items if _is_5min_mark(s)]
     hourly = []
     for h in range(10, 19):  # 10 AM to 6 PM
         best = None
-        best_diff = float("inf")
-        for s in items:
-            if s.recorded_at:
-                t = s.recorded_at + IST
-                diff = abs((t.hour * 60 + t.minute) - h * 60)
-                if diff < best_diff and diff <= 30:
-                    best_diff = diff
+        best_occ = -1
+        for s in valid:
+            t = s.recorded_at + IST
+            if t.hour == h:
+                occ = s.car_occupied + s.two_wheeler_occupied
+                if occ > best_occ:
+                    best_occ = occ
                     best = s
         hourly.append({
             "hour": h,
@@ -102,8 +112,10 @@ def build_occupancy_stats(rows: list, hourly: list) -> dict:
 
 def build_parking_report(items) -> dict:
     """Assemble the AI-Parking report shared by the PDF and the shared link:
-    hourly occupancy (10 AM-6 PM) + summary stats. ``items`` are ParkingScan rows."""
-    hourly = build_hourly_occupancy(items)
+    hourly occupancy (10 AM-6 PM) + summary stats. ``items`` are ParkingScan rows.
+    Only scans at exact 5-minute marks are used."""
+    valid = [s for s in items if _is_5min_mark(s)]
+    hourly = build_hourly_occupancy(valid)
     rows = [
         {
             "occ_car": s.car_occupied,
@@ -111,6 +123,6 @@ def build_parking_report(items) -> dict:
             "occ_bike": s.two_wheeler_occupied,
             "tot_bike": s.two_wheeler_total,
         }
-        for s in items
+        for s in valid
     ]
     return {"hourly": hourly, "stats": build_occupancy_stats(rows, hourly)}
