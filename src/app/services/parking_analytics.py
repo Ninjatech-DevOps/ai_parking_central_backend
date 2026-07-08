@@ -34,19 +34,11 @@ def _peak_hour_display(hourly: dict) -> tuple:
     return _fmt_hour_label(peak_h), peak_val
 
 
-def _is_5min_mark(scan) -> bool:
-    """Only accept scans at exact 5-minute marks (:00, :05, :10, … :55)."""
-    if not scan.recorded_at:
-        return False
-    t = scan.recorded_at + IST
-    return t.minute % 5 == 0
-
-
 def build_hourly_occupancy(items) -> list:
     """Hourly occupancy (10 AM - 6 PM): for each hour pick the single scan
-    (at an exact 5-min mark) with the highest car occupancy.
-    ``items`` are ParkingScan ORM rows."""
-    valid = [s for s in items if _is_5min_mark(s)]
+    with the highest total occupancy. Uses UTC minute % 5 == 0 filter, and
+    IST hour for bucketing. ``items`` are ParkingScan ORM rows."""
+    valid = [s for s in items if s.recorded_at and s.recorded_at.minute % 5 == 0]
     hourly = []
     for h in range(10, 19):
         best = None
@@ -113,6 +105,6 @@ def build_occupancy_stats(rows: list, hourly: list) -> dict:
 
 def build_parking_report(items) -> dict:
     """Assemble the AI-Parking report: hourly occupancy (10 AM-6 PM) + summary
-    stats. Only scans at exact 5-minute marks are used."""
+    stats. Only scans at exact 5-minute marks (UTC) are used."""
     hourly = build_hourly_occupancy(items)
     return {"hourly": hourly, "stats": build_occupancy_stats([], hourly)}
