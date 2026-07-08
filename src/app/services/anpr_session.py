@@ -24,9 +24,12 @@ class AnprSessionService:
         is_active: Optional[bool] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
+        sort_by: str = "out_time",
+        sort_order: str = "desc",
     ) -> List[AnprSession]:
         return await self.repo.get_filtered(
-            skip, limit, location_id, location_ids, number_plate, vehicle_type, is_active, start_date, end_date
+            skip, limit, location_id, location_ids, number_plate, vehicle_type, is_active,
+            start_date, end_date, sort_by, sort_order,
         )
 
     async def count_filtered(

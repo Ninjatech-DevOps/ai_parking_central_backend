@@ -61,6 +61,8 @@ async def list_sessions(
     is_active: Optional[bool] = Query(None),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
+    sort_by: str = Query("out_time", description="Sort field: out_time/exit_time/out (default) or in_time/entry_time/in; a direction may be encoded here too, e.g. exit_time_desc or -exit_time"),
+    sort_order: str = Query("desc", description="asc or desc (default); ignored if a direction is encoded in sort_by"),
     service: AnprSessionService = Depends(_get_service),
     _: bool = Depends(PermissionChecker(Permission.ANPR_VIEW)),
     user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
@@ -75,7 +77,8 @@ async def list_sessions(
     end = _parse_date(end_date)
 
     items = await service.get_filtered(
-        skip, limit, location_id, scoped_ids, number_plate, vehicle_type, is_active, start, end
+        skip, limit, location_id, scoped_ids, number_plate, vehicle_type, is_active, start, end,
+        sort_by, sort_order,
     )
     total = await service.count_filtered(
         location_id, scoped_ids, number_plate, vehicle_type, is_active, start, end

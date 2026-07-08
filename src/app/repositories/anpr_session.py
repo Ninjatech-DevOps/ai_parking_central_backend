@@ -37,12 +37,42 @@ class AnprSessionRepository(BaseRepository[AnprSession]):
         is_active: Optional[bool] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
+        sort_by: str = "out_time",
+        sort_order: str = "desc",
     ) -> List[AnprSession]:
         query = select(AnprSession)
         query = self._apply_filters(query, location_id, location_ids, number_plate, vehicle_type, is_active, start_date, end_date)
-        query = query.order_by(AnprSession.entry_time.desc()).offset(skip).limit(limit)
+        col, direction = self._resolve_sort(sort_by, sort_order)
+        # exit_time is nullable (still-parked sessions) -> keep those rows last
+        # via NULLS LAST; id is a deterministic tiebreak.
+        query = (
+            query.order_by(direction.nullslast(), AnprSession.id.desc())
+            .offset(skip).limit(limit)
+        )
         result = await self.db.execute(query)
         return list(result.scalars().all())
+
+    @staticmethod
+    def _resolve_sort(sort_by: str, sort_order: str):
+        """Tolerantly map the frontend's sort filter onto an order column +
+        direction. Accepts field aliases (out_time/exit_time/out,
+        in_time/entry_time/in) and a direction encoded in sort_by itself
+        (e.g. 'exit_time_desc', '-exit_time'). Defaults to out-time, desc."""
+        sb = (sort_by or "").strip().lower()
+        so = (sort_order or "").strip().lower()
+        # Direction encoded inside sort_by (single-param frontends).
+        if sb.startswith("-"):
+            so, sb = "desc", sb[1:]
+        elif sb.startswith("+"):
+            so, sb = "asc", sb[1:]
+        for suffix, d in (("_desc", "desc"), ("_asc", "asc"), (" desc", "desc"), (" asc", "asc")):
+            if sb.endswith(suffix):
+                so, sb = d, sb[: -len(suffix)]
+                break
+        in_aliases = {"in_time", "entry_time", "in", "entry", "intime", "entrytime"}
+        col = AnprSession.entry_time if sb in in_aliases else AnprSession.exit_time
+        direction = col.asc() if so == "asc" else col.desc()
+        return col, direction
 
     async def count_filtered(
         self,
