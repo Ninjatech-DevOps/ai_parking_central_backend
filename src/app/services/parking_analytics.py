@@ -62,8 +62,8 @@ def build_hourly_occupancy(items) -> list:
 def build_occupancy_stats(rows: list, hourly: list) -> dict:
     """Summary stat tiles for the occupancy report:
     Peak Hour, Peak Occupancy %, Avg Car Occ %, Avg 2W Occ %, Max Cars, Max 2W.
-    ``rows`` = [{occ_car, tot_car, occ_bike, tot_bike}] over every scan in the
-    window; ``hourly`` = build_hourly_occupancy output. Mirrors the PDF."""
+    All stats are derived from ``hourly`` (the same 9 data points the chart shows)
+    so numbers are always consistent with the bar chart."""
     hourly_occ = {d.get("hour", 0): d.get("occ_car", 0) + d.get("occ_bike", 0) for d in hourly}
     peak_label, peak_count = _peak_hour_display(hourly_occ)
 
@@ -72,12 +72,11 @@ def build_occupancy_stats(rows: list, hourly: list) -> dict:
     max_cars = 0
     max_bikes = 0
     peak_occ_pct = 0
-    for r in rows:
+    for r in hourly:
         car_occ = r.get("occ_car", 0)
         car_cap = r.get("tot_car", 0)
         bike_occ = r.get("occ_bike", 0)
         bike_cap = r.get("tot_bike", 0)
-        # Peak = highest individual type %, so 7/7 cars = 100% even if 2W is 0/2.
         car_pct = min(100, round(car_occ / car_cap * 100)) if car_cap > 0 else 0
         bike_pct = min(100, round(bike_occ / bike_cap * 100)) if bike_cap > 0 else 0
         peak_occ_pct = max(peak_occ_pct, car_pct, bike_pct)

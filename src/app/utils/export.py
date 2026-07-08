@@ -1504,37 +1504,26 @@ def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
     lowest_h = min(hourly_occ, key=hourly_occ.get) if hourly_occ else None
     lowest_val = hourly_occ.get(lowest_h, 0) if lowest_h is not None else 0
 
-    # Detailed stats from ALL scan rows (every 5-min interval, not just hourly)
-    all_occ_pcts = []
+    # Stats from hourly data (same 9 data points the chart shows) so numbers match
     max_cars = 0
     max_bikes = 0
     peak_occ_pct = 0
-    for r in rows:
-        car_occ = r.get("occ_car", 0)
-        car_cap = r.get("tot_car", 0)
-        bike_occ = r.get("occ_bike", 0)
-        bike_cap = r.get("tot_bike", 0)
-        total_occ = car_occ + bike_occ
-        total_cap = car_cap + bike_cap
-        if total_cap > 0:
-            all_occ_pcts.append(round(total_occ / total_cap * 100))
-        # Peak = highest individual type %, capped at 100 (detection can exceed slot count)
+    all_car_pcts = []
+    all_bike_pcts = []
+    for d in hourly_data:
+        car_occ = d.get("occ_car", 0)
+        car_cap = d.get("tot_car", 0)
+        bike_occ = d.get("occ_bike", 0)
+        bike_cap = d.get("tot_bike", 0)
         car_pct = min(100, round(car_occ / car_cap * 100)) if car_cap > 0 else 0
         bike_pct = min(100, round(bike_occ / bike_cap * 100)) if bike_cap > 0 else 0
         peak_occ_pct = max(peak_occ_pct, car_pct, bike_pct)
         max_cars = max(max_cars, car_occ)
         max_bikes = max(max_bikes, bike_occ)
-
-    # Per-type avg occupancy
-    all_car_pcts = []
-    all_bike_pcts = []
-    for r in rows:
-        cc = r.get("tot_car", 0)
-        bc = r.get("tot_bike", 0)
-        if cc > 0:
-            all_car_pcts.append(min(100, round(r.get("occ_car", 0) / cc * 100)))
-        if bc > 0:
-            all_bike_pcts.append(min(100, round(r.get("occ_bike", 0) / bc * 100)))
+        if car_cap > 0:
+            all_car_pcts.append(car_pct)
+        if bike_cap > 0:
+            all_bike_pcts.append(bike_pct)
     avg_car_occ = round(sum(all_car_pcts) / len(all_car_pcts)) if all_car_pcts else 0
     avg_bike_occ = round(sum(all_bike_pcts) / len(all_bike_pcts)) if all_bike_pcts else 0
 
@@ -1556,8 +1545,8 @@ def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
                     "Peak Hour", peak_label,
                     f"{peak_count} occupied" if peak_count else None, TEAL)
     _mini_stat_tile(pdf, stats_x + tw + gap, sy, tw, th,
-                    "Peak Occupancy", f"{peak_occ_pct}%",
-                    "highest reached", AMBER)
+                    "Peak Occupancy Car", f"{peak_occ_pct}%",
+                    "highest reached", RED if peak_occ_pct >= 100 else AMBER)
 
     sy += th + gap
     _mini_stat_tile(pdf, stats_x, sy, tw, th,
