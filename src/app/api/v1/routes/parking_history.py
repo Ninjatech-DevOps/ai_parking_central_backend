@@ -140,8 +140,23 @@ async def get_occupancy_summary(
     scoped_ids = await _resolve_scope(area_id, user_location_ids, db)
 
     summary = await service.current_occupancy_summary(location_id, scoped_ids)
-    car = summary["car"]
-    bike = summary["bike"]
+    # Re-aggregate per location (not per camera) to avoid double-counting
+    # when multiple cameras at one location each report the full slot total.
+    scans = await service.repo.latest_per_location(location_id, scoped_ids)
+    seen: dict = {}
+    for s in scans:
+        if s.location_id not in seen:
+            seen[s.location_id] = s
+    car = {
+        "total": sum(s.car_total or 0 for s in seen.values()),
+        "occupied": sum(s.car_occupied or 0 for s in seen.values()),
+        "available": sum(s.car_available or 0 for s in seen.values()),
+    }
+    bike = {
+        "total": sum(s.two_wheeler_total or 0 for s in seen.values()),
+        "occupied": sum(s.two_wheeler_occupied or 0 for s in seen.values()),
+        "available": sum(s.two_wheeler_available or 0 for s in seen.values()),
+    }
     recorded_at = summary.get("latest_recorded_at")
 
     location_name = "All locations"
@@ -285,14 +300,26 @@ async def export_scans_pdf(
             "tot_bike": s.two_wheeler_total,
         })
 
-    # Summary cards = latest scan in the filtered window (not live state).
-    if items:
-        latest = items[0]  # items sorted desc by recorded_at
+    # Summary cards = latest scan per location in the filtered window,
+    # summed across locations (not per camera, to avoid double-counting).
+    seen_locs: dict = {}
+    for s in items:
+        if s.location_id not in seen_locs:
+            seen_locs[s.location_id] = s  # items sorted desc, first = latest
+    if seen_locs:
         summary = {
-            "car": {"total": latest.car_total, "occupied": latest.car_occupied, "available": latest.car_available},
-            "bike": {"total": latest.two_wheeler_total, "occupied": latest.two_wheeler_occupied, "available": latest.two_wheeler_available},
+            "car": {
+                "total": sum(s.car_total or 0 for s in seen_locs.values()),
+                "occupied": sum(s.car_occupied or 0 for s in seen_locs.values()),
+                "available": sum(s.car_available or 0 for s in seen_locs.values()),
+            },
+            "bike": {
+                "total": sum(s.two_wheeler_total or 0 for s in seen_locs.values()),
+                "occupied": sum(s.two_wheeler_occupied or 0 for s in seen_locs.values()),
+                "available": sum(s.two_wheeler_available or 0 for s in seen_locs.values()),
+            },
         }
-        recorded_at = latest.recorded_at
+        recorded_at = items[0].recorded_at
     else:
         summary = {"car": {"total": 0, "occupied": 0, "available": 0}, "bike": {"total": 0, "occupied": 0, "available": 0}}
         recorded_at = None

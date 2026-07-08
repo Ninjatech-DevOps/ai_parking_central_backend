@@ -23,6 +23,7 @@ from src.app.api.v1.routes import (
     report,
     shared_link,
     public_view,
+    public_occupancy,
     anpr_camera_config,
     anpr_record,
     anpr_session,
@@ -55,6 +56,7 @@ api_v1_router.include_router(role.router)
 api_v1_router.include_router(report.router, include_in_schema=False)
 api_v1_router.include_router(shared_link.router)
 api_v1_router.include_router(public_view.router)
+api_v1_router.include_router(public_occupancy.router)
 api_v1_router.include_router(anpr_camera_config.router)
 api_v1_router.include_router(anpr_record.router)
 api_v1_router.include_router(anpr_session.router)
