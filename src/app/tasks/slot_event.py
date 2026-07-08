@@ -54,6 +54,7 @@ async def _process(device_id_str: str, camera_id: Optional[str], changes: list):
                 image_url = change.get("image_url")
                 occupied_car = change.get("occupied_car", 0)
                 occupied_two_wheeler = change.get("occupied_two_wheeler", 0)
+                has_obstruction = change.get("has_obstruction", False)
 
                 # Find active slot by label within device's zone
                 query = select(ParkingSlot).where(
@@ -79,6 +80,7 @@ async def _process(device_id_str: str, camera_id: Optional[str], changes: list):
                         detected_vehicle_type=effective_vtype,
                         occupied_car=occupied_car,
                         occupied_two_wheeler=occupied_two_wheeler,
+                        has_obstruction=has_obstruction,
                     )
                 )
 

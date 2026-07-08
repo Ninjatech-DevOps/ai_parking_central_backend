@@ -147,6 +147,7 @@ async def get_canvas_data(
                             and s.detected_vehicle_type is not None
                             and s.detected_vehicle_type != (s.slot_type or "GENERAL")
                         ),
+                        has_obstruction=s.has_obstruction,
                         capacity_car=s.capacity_car,
                         capacity_two_wheeler=s.capacity_two_wheeler,
                         occupied_car=s.occupied_car,
