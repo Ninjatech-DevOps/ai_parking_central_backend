@@ -29,6 +29,7 @@ class ParkingSlot(Base, UUIDMixin, TimestampMixin):
     # Per-type occupied count (currently detected vehicles)
     occupied_car: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     occupied_two_wheeler: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    has_obstruction: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Polygon coordinates from client ROI (JSON: [[x1,y1],[x2,y2],[x3,y3],[x4,y4]])
     polygon_coords: Mapped[str] = mapped_column(Text, nullable=True)
