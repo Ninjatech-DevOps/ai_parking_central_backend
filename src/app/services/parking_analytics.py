@@ -2,8 +2,7 @@
 
 Hourly-occupancy and summary-stat builders shared by the AI Parking Occupancy
 PDF export (``parking_history`` route) and the public shared-link view
-(``public_view`` route), so both render identical charts/stats. The formulas
-mirror the PDF's ``export_scans_pdf`` hourly loop and ``_chart_and_stats_section``.
+(``public_view`` route), so both render identical charts/stats.
 """
 from datetime import timedelta
 
@@ -35,57 +34,42 @@ def _peak_hour_display(hourly: dict) -> tuple:
     return _fmt_hour_label(peak_h), peak_val
 
 
-def _aggregate_by_5min(items) -> list:
-    """Group scans into 5-minute buckets, summing across cameras at each tick.
-    Returns list of dicts with occ_car/tot_car/occ_bike/tot_bike/hour/minute."""
-    buckets: dict = {}
-    for s in items:
-        if not s.recorded_at:
-            continue
-        t = s.recorded_at + IST
-        if t.minute % 5 != 0:
-            continue
-        key = (t.year, t.month, t.day, t.hour, (t.minute // 5) * 5)
-        if key not in buckets:
-            buckets[key] = {"hour": t.hour, "minute": key[4],
-                            "occ_car": 0, "tot_car": 0, "occ_bike": 0, "tot_bike": 0}
-        b = buckets[key]
-        b["occ_car"] += s.car_occupied or 0
-        b["tot_car"] += s.car_total or 0
-        b["occ_bike"] += s.two_wheeler_occupied or 0
-        b["tot_bike"] += s.two_wheeler_total or 0
-    return list(buckets.values())
+def _is_5min_mark(scan) -> bool:
+    """Only accept scans at exact 5-minute marks (:00, :05, :10, … :55)."""
+    if not scan.recorded_at:
+        return False
+    t = scan.recorded_at + IST
+    return t.minute % 5 == 0
 
 
 def build_hourly_occupancy(items) -> list:
-    """Hourly occupancy (10 AM - 6 PM): highest occupancy 5-min bucket within
-    each hour, aggregated across all cameras. ``items`` are ParkingScan ORM rows."""
-    agg = _aggregate_by_5min(items)
+    """Hourly occupancy (10 AM - 6 PM): for each hour pick the single scan
+    (at an exact 5-min mark) with the highest car occupancy.
+    ``items`` are ParkingScan ORM rows."""
+    valid = [s for s in items if _is_5min_mark(s)]
     hourly = []
     for h in range(10, 19):
         best = None
         best_occ = -1
-        for b in agg:
-            if b["hour"] == h:
-                occ = b["occ_car"] + b["occ_bike"]
+        for s in valid:
+            t = s.recorded_at + IST
+            if t.hour == h:
+                occ = s.car_occupied + s.two_wheeler_occupied
                 if occ > best_occ:
                     best_occ = occ
-                    best = b
+                    best = s
         hourly.append({
             "hour": h,
-            "occ_car": best["occ_car"] if best else 0,
-            "tot_car": best["tot_car"] if best else 0,
-            "occ_bike": best["occ_bike"] if best else 0,
-            "tot_bike": best["tot_bike"] if best else 0,
+            "occ_car": best.car_occupied if best else 0,
+            "tot_car": best.car_total if best else 0,
+            "occ_bike": best.two_wheeler_occupied if best else 0,
+            "tot_bike": best.two_wheeler_total if best else 0,
         })
     return hourly
 
 
 def build_occupancy_stats(rows: list, hourly: list) -> dict:
-    """Summary stat tiles for the occupancy report:
-    Peak Hour, Peak Occupancy %, Avg Car Occ %, Avg 2W Occ %, Max Cars, Max 2W.
-    All stats are derived from ``hourly`` (the same 9 data points the chart shows)
-    so numbers are always consistent with the bar chart."""
+    """Summary stat tiles derived from ``hourly`` (same data the chart shows)."""
     hourly_occ = {d.get("hour", 0): d.get("occ_car", 0) + d.get("occ_bike", 0) for d in hourly}
     peak_label, peak_count = _peak_hour_display(hourly_occ)
 
@@ -123,9 +107,7 @@ def build_occupancy_stats(rows: list, hourly: list) -> dict:
 
 
 def build_parking_report(items) -> dict:
-    """Assemble the AI-Parking report shared by the PDF and the shared link:
-    hourly occupancy (10 AM-6 PM) + summary stats. ``items`` are ParkingScan rows.
-    Only scans at exact 5-minute marks are used, aggregated across cameras."""
+    """Assemble the AI-Parking report: hourly occupancy (10 AM-6 PM) + summary
+    stats. Only scans at exact 5-minute marks are used."""
     hourly = build_hourly_occupancy(items)
-    rows = _aggregate_by_5min(items)
-    return {"hourly": hourly, "stats": build_occupancy_stats(rows, hourly)}
+    return {"hourly": hourly, "stats": build_occupancy_stats([], hourly)}
