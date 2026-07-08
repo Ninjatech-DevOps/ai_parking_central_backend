@@ -6,12 +6,10 @@ PDF export (``parking_history`` route) and the public shared-link view
 """
 from datetime import timedelta
 
-# IST offset — hourly buckets/labels align to local hours (10 AM ... 6 PM).
 IST = timedelta(hours=5, minutes=30)
 
 
 def _fmt_hour_label(h: int) -> str:
-    """10 -> '10 AM', 13 -> '1 PM', etc."""
     if h == 0:
         return "12 AM"
     if h < 12:
@@ -22,9 +20,6 @@ def _fmt_hour_label(h: int) -> str:
 
 
 def _peak_hour_display(hourly: dict) -> tuple:
-    """Return (peak_hour_label, occupied_count) for the busiest hour.
-    Always returns the single first hour with the highest count.
-    Returns ("-", 0) if no data."""
     if not hourly:
         return "-", 0
     peak_val = max(hourly.values())
@@ -35,18 +30,18 @@ def _peak_hour_display(hourly: dict) -> tuple:
 
 
 def build_hourly_occupancy(items) -> list:
-    """Hourly occupancy (10 AM - 6 PM): for each hour pick the single scan
-    with the highest total occupancy. Uses UTC minute % 5 == 0 filter, and
-    IST hour for bucketing. ``items`` are ParkingScan ORM rows."""
-    valid = [s for s in items if s.recorded_at and s.recorded_at.minute % 5 == 0]
+    """Hourly occupancy (10 AM - 6 PM): for each hour pick the scan with
+    the highest total occupancy. ``items`` are ParkingScan ORM rows."""
     hourly = []
     for h in range(10, 19):
         best = None
         best_occ = -1
-        for s in valid:
+        for s in items:
+            if not s.recorded_at:
+                continue
             t = s.recorded_at + IST
             if t.hour == h:
-                occ = s.car_occupied + s.two_wheeler_occupied
+                occ = (s.car_occupied or 0) + (s.two_wheeler_occupied or 0)
                 if occ > best_occ:
                     best_occ = occ
                     best = s
@@ -61,10 +56,10 @@ def build_hourly_occupancy(items) -> list:
 
 
 def build_occupancy_stats(rows: list, hourly: list) -> dict:
-    """Summary stat tiles derived from ``hourly`` (same data the chart shows)."""
     hourly_occ = {d.get("hour", 0): d.get("occ_car", 0) + d.get("occ_bike", 0) for d in hourly}
     peak_label, peak_count = _peak_hour_display(hourly_occ)
-    peak_h_data = next((d for d in hourly if d.get("hour") == (max(hourly_occ, key=hourly_occ.get) if hourly_occ else -1)), None)
+    peak_h = max(hourly_occ, key=hourly_occ.get) if hourly_occ else -1
+    peak_h_data = next((d for d in hourly if d.get("hour") == peak_h), None)
     peak_car = peak_h_data.get("occ_car", 0) if peak_h_data else 0
     peak_2w = peak_h_data.get("occ_bike", 0) if peak_h_data else 0
 
@@ -104,7 +99,5 @@ def build_occupancy_stats(rows: list, hourly: list) -> dict:
 
 
 def build_parking_report(items) -> dict:
-    """Assemble the AI-Parking report: hourly occupancy (10 AM-6 PM) + summary
-    stats. Only scans at exact 5-minute marks (UTC) are used."""
     hourly = build_hourly_occupancy(items)
     return {"hourly": hourly, "stats": build_occupancy_stats([], hourly)}
