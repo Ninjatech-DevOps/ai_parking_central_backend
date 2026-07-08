@@ -1515,8 +1515,8 @@ def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
         car_cap = d.get("tot_car", 0)
         bike_occ = d.get("occ_bike", 0)
         bike_cap = d.get("tot_bike", 0)
-        car_pct = min(100, round(car_occ / car_cap * 100)) if car_cap > 0 else 0
-        bike_pct = min(100, round(bike_occ / bike_cap * 100)) if bike_cap > 0 else 0
+        car_pct = round(car_occ / car_cap * 100) if car_cap > 0 else 0
+        bike_pct = round(bike_occ / bike_cap * 100) if bike_cap > 0 else 0
         peak_occ_pct = max(peak_occ_pct, car_pct, bike_pct)
         max_cars = max(max_cars, car_occ)
         max_bikes = max(max_bikes, bike_occ)
@@ -1784,7 +1784,7 @@ def generate_parking_history_pdf(meta: dict, summary: dict, rows: list, hourly_d
         y = 25
         car_total = car.get("total", 0)
         car_occ = car.get("occupied", 0)
-        car_pct = min(100, round((car_occ / car_total * 100))) if car_total > 0 else 0
+        car_pct = round((car_occ / car_total * 100)) if car_total > 0 else 0
         _txt(pdf, M, y, W, "Cars", size=10, style="B", color=SLATE_900, h=5)
         y += 7
         _occ_tile(pdf, M, y, tw, th, "Total cars", car_total, "neutral")
@@ -1795,7 +1795,7 @@ def generate_parking_history_pdf(meta: dict, summary: dict, rows: list, hourly_d
 
         bike_total = bike.get("total", 0)
         bike_occ = bike.get("occupied", 0)
-        bike_pct = min(100, round((bike_occ / bike_total * 100))) if bike_total > 0 else 0
+        bike_pct = round((bike_occ / bike_total * 100)) if bike_total > 0 else 0
         _txt(pdf, M, y, W, "2 Wheeler", size=10, style="B", color=SLATE_900, h=5)
         y += 7
         _occ_tile(pdf, M, y, tw, th, "Total 2W", bike_total, "neutral")
