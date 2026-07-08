@@ -109,19 +109,24 @@ async def get_public_occupancy_summary(
     location_ids = await service._resolve_location_ids(link)
     location_id_set = set(location_ids) if location_ids else set()
 
-    from src.app.services.parking_scan import ParkingScanService
-    scan_service = ParkingScanService(ParkingScanRepository(db))
-    summary = await scan_service.current_occupancy_summary(location_ids=location_id_set or None)
-
     # Report — windowed hourly occupancy (10 AM-6 PM) + summary stats, mirroring
     # the AI Parking Occupancy PDF. Window defaults to today when unset.
     start = _parse_date(start_date)
     end = _parse_date(end_date)
-    report_items = await ParkingScanRepository(db).get_filtered(
+    repo = ParkingScanRepository(db)
+    report_items = await repo.get_filtered(
         0, 5000, location_ids=location_id_set or None,
         start_date=start, end_date=end,
     )
     report = build_parking_report(report_items)
+
+    # Summary cards — aggregate latest scan per location within the filtered
+    # window (same logic as current_occupancy_summary but date-bounded).
+    from src.app.services.parking_scan import ParkingScanService
+    scan_service = ParkingScanService(repo)
+    summary = await scan_service.current_occupancy_summary(
+        location_ids=location_id_set or None, since=start, until=end,
+    )
 
     return {
         "car_occupied": summary["car"]["occupied"],
