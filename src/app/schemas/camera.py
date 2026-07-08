@@ -82,6 +82,10 @@ class CanvasCamera(BaseSchema):
     frame_height: Optional[int] = None
     debug_frame_url: Optional[str] = None
     clean_frame_url: Optional[str] = None
+    # Latest frame with ROI polylines only (no vehicle boxes) — same image the
+    # Parking History page shows. Alias of the clean frame; use this to display
+    # the latest snapshot without detection boxes.
+    latest_frame_url: Optional[str] = None
     slots: List[CanvasSlot]
 
 

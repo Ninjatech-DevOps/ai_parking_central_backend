@@ -288,6 +288,7 @@ class SharedLinkService:
                     "frame_height": cam.frame_height,
                     "debug_frame_url": debug_url,
                     "clean_frame_url": clean_url,
+                    "latest_frame_url": clean_url,
                     "slots": slot_list,
                 })
 

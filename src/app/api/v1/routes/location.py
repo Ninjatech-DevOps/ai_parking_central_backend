@@ -135,6 +135,7 @@ async def get_canvas_data(
                 frame_height=cam.frame_height,
                 debug_frame_url=debug_url,
                 clean_frame_url=clean_url,
+                latest_frame_url=clean_url,
                 slots=[
                     CanvasSlot(
                         id=s.id, label=s.label, state=s.state,
