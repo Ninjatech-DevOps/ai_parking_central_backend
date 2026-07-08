@@ -120,22 +120,21 @@ async def get_public_occupancy_summary(
     )
     report = build_parking_report(report_items)
 
-    # Summary cards = latest scan in the filtered window (same as PDF export).
-    if report_items:
-        latest = report_items[0]  # sorted desc by recorded_at
-        return {
-            "car_occupied": latest.car_occupied or 0,
-            "car_available": latest.car_available or 0,
-            "car_total": latest.car_total or 0,
-            "two_wheeler_occupied": latest.two_wheeler_occupied or 0,
-            "two_wheeler_available": latest.two_wheeler_available or 0,
-            "two_wheeler_total": latest.two_wheeler_total or 0,
-            "report": report,
-        }
+    # Summary cards — aggregate latest scan per location within the filtered
+    # window (same logic as current_occupancy_summary but date-bounded).
+    from src.app.services.parking_scan import ParkingScanService
+    scan_service = ParkingScanService(repo)
+    summary = await scan_service.current_occupancy_summary(
+        location_ids=location_id_set or None, since=start, until=end,
+    )
 
     return {
-        "car_occupied": 0, "car_available": 0, "car_total": 0,
-        "two_wheeler_occupied": 0, "two_wheeler_available": 0, "two_wheeler_total": 0,
+        "car_occupied": summary["car"]["occupied"],
+        "car_available": summary["car"]["available"],
+        "car_total": summary["car"]["total"],
+        "two_wheeler_occupied": summary["bike"]["occupied"],
+        "two_wheeler_available": summary["bike"]["available"],
+        "two_wheeler_total": summary["bike"]["total"],
         "report": report,
     }
 

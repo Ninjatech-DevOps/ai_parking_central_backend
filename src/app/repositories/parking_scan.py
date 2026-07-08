@@ -80,23 +80,25 @@ class ParkingScanRepository(BaseRepository[ParkingScan]):
         location_id: Optional[uuid.UUID] = None,
         location_ids: Optional[Set[uuid.UUID]] = None,
         since: Optional[datetime] = None,
+        until: Optional[datetime] = None,
     ) -> List[ParkingScan]:
-        """Return the most recent scan for each location in scope.
+        """Return the most recent scan for each CAMERA in scope.
 
-        Uses Postgres DISTINCT ON (location_id) ordered by recorded_at DESC, so
-        each location contributes exactly its latest reading. For a single
-        location this is just its last entry; with no location filter it returns
-        one latest row per location across the scope (to be summed by the caller).
+        Scans are written per-camera, so a location with multiple cameras has one
+        latest row per camera. We DISTINCT ON (camera_id) — not location_id — so
+        every camera contributes its latest reading and the caller sums across all
+        cameras of a location. This matches the dashboard canvas (which sums all
+        slots across all cameras); DISTINCT ON (location_id) kept only ONE camera
+        per location and undercounted multi-camera locations.
 
-        `since`: only consider scans at/after this time (e.g. start-of-today), so
-        locations with no recent reading are excluded — "today's live occupancy".
+        `since`/`until`: only consider scans within this time window.
         """
         query = (
             select(ParkingScan)
-            .distinct(ParkingScan.location_id)
-            .order_by(ParkingScan.location_id, ParkingScan.recorded_at.desc(), ParkingScan.id.desc())
+            .distinct(ParkingScan.camera_id)
+            .order_by(ParkingScan.camera_id, ParkingScan.recorded_at.desc(), ParkingScan.id.desc())
         )
-        query = self._apply_filters(query, location_id, location_ids, since, None)
+        query = self._apply_filters(query, location_id, location_ids, since, until)
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
