@@ -1495,16 +1495,18 @@ def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
     stats_x = x + W - stats_w
     gap = 3
 
-    # Hourly stats (for chart + peak hour)
-    hourly_occ = {}  # hour -> total occupied
+    # Separate peak hours for car and 2W
+    hourly_car = {}
+    hourly_bike = {}
     for d in hourly_data:
-        hourly_occ[d.get("hour", 0)] = d.get("occ_car", 0) + d.get("occ_bike", 0)
+        h = d.get("hour", 0)
+        hourly_car[h] = d.get("occ_car", 0)
+        hourly_bike[h] = d.get("occ_bike", 0)
 
-    peak_label, peak_count = _peak_hour_display(hourly_occ)
-    lowest_h = min(hourly_occ, key=hourly_occ.get) if hourly_occ else None
-    lowest_val = hourly_occ.get(lowest_h, 0) if lowest_h is not None else 0
+    peak_car_label, peak_car_count = _peak_hour_display(hourly_car)
+    peak_bike_label, peak_bike_count = _peak_hour_display(hourly_bike)
 
-    # Stats from hourly data (same 9 data points the chart shows) so numbers match
+    # Stats from hourly data (same 9 data points the chart shows)
     max_cars = 0
     max_bikes = 0
     peak_occ_pct = 0
@@ -1527,11 +1529,12 @@ def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
     avg_car_occ = round(sum(all_car_pcts) / len(all_car_pcts)) if all_car_pcts else 0
     avg_bike_occ = round(sum(all_bike_pcts) / len(all_bike_pcts)) if all_bike_pcts else 0
 
-    # Tile layout: 3 rows x 2 cols — compute tile height, then match chart
+    # Tile layout: 4 rows x 2 cols
     tw = (stats_w - gap) / 2
-    th = 20  # fixed tile height
-    tiles_h = 3 * th + 2 * gap  # total tiles block height
-    section_h = title_h + tiles_h  # chart matches this exactly
+    th = 18
+    tile_rows = 4
+    tiles_h = tile_rows * th + (tile_rows - 1) * gap
+    section_h = title_h + tiles_h
 
     # ── Left: Bar chart ──
     _txt(pdf, x, y, chart_w, "Hourly Occupancy (10 AM - 6 PM)", size=8, style="B", color=SLATE_900, h=title_h)
@@ -1542,27 +1545,27 @@ def _chart_and_stats_section(pdf, x, y, W, hourly_data, rows):
     sy = y + title_h
 
     _mini_stat_tile(pdf, stats_x, sy, tw, th,
-                    "Peak Hour", peak_label,
-                    f"{peak_count} occupied" if peak_count else None, TEAL)
+                    "Peak Hour Car", peak_car_label,
+                    f"{peak_car_count} occupied" if peak_car_count else None, TEAL)
     _mini_stat_tile(pdf, stats_x + tw + gap, sy, tw, th,
+                    "Peak Hour 2W", peak_bike_label,
+                    f"{peak_bike_count} occupied" if peak_bike_count else None, TEAL)
+
+    sy += th + gap
+    _mini_stat_tile(pdf, stats_x, sy, tw, th,
                     "Peak Occupancy Car", f"{peak_occ_pct}%",
-                    "highest reached", RED if peak_occ_pct >= 100 else AMBER)
-
-    sy += th + gap
-    _mini_stat_tile(pdf, stats_x, sy, tw, th,
+                    None, RED if peak_occ_pct >= 100 else AMBER)
+    _mini_stat_tile(pdf, stats_x + tw + gap, sy, tw, th,
                     "Avg Car Occ", f"{avg_car_occ}%", None, BLUE)
-    _mini_stat_tile(pdf, stats_x + tw + gap, sy, tw, th,
-                    "Avg 2W Occ", f"{avg_bike_occ}%", None, INDIGO)
-
-    # # Lowest hour (commented out)
-    # _mini_stat_tile(pdf, stats_x, sy, tw, th,
-    #                 "Lowest", _fmt_hour_label(lowest_h) if lowest_h is not None else "-",
-    #                 f"{lowest_val} occupied" if lowest_h is not None else None, EMERALD)
 
     sy += th + gap
     _mini_stat_tile(pdf, stats_x, sy, tw, th,
-                    "Max Cars", str(max_cars), None, BLUE)
+                    "Avg 2W Occ", f"{avg_bike_occ}%", None, INDIGO)
     _mini_stat_tile(pdf, stats_x + tw + gap, sy, tw, th,
+                    "Max Cars", str(max_cars), None, BLUE)
+
+    sy += th + gap
+    _mini_stat_tile(pdf, stats_x, sy, tw, th,
                     "Max 2W", str(max_bikes), None, INDIGO)
 
     return y + section_h + 4

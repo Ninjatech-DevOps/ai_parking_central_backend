@@ -70,8 +70,10 @@ def build_hourly_occupancy(items) -> list:
 
 def build_occupancy_stats(rows: list, hourly: list) -> dict:
     """Summary stat tiles derived from ``hourly`` (same data the chart shows)."""
-    hourly_occ = {d.get("hour", 0): d.get("occ_car", 0) + d.get("occ_bike", 0) for d in hourly}
-    peak_label, peak_count = _peak_hour_display(hourly_occ)
+    hourly_car = {d.get("hour", 0): d.get("occ_car", 0) for d in hourly}
+    hourly_bike = {d.get("hour", 0): d.get("occ_bike", 0) for d in hourly}
+    peak_car_label, peak_car_count = _peak_hour_display(hourly_car)
+    peak_bike_label, peak_bike_count = _peak_hour_display(hourly_bike)
 
     all_car_pcts = []
     all_bike_pcts = []
@@ -96,8 +98,10 @@ def build_occupancy_stats(rows: list, hourly: list) -> dict:
     avg_bike_occ = round(sum(all_bike_pcts) / len(all_bike_pcts)) if all_bike_pcts else 0
 
     return {
-        "peak_hour_label": peak_label,
-        "peak_hour_count": peak_count,
+        "peak_hour_car_label": peak_car_label,
+        "peak_hour_car_count": peak_car_count,
+        "peak_hour_2w_label": peak_bike_label,
+        "peak_hour_2w_count": peak_bike_count,
         "peak_occupancy_pct": peak_occ_pct,
         "avg_car_occ": avg_car_occ,
         "avg_2w_occ": avg_bike_occ,
