@@ -85,6 +85,9 @@ async def list_sessions(
     for session in items:
         resp = AnprSessionResponse.model_validate(session)
         resp.duration_display = AnprSessionService.format_duration(session.entry_time, session.exit_time)
+        # Per-session revenue (₹), realised only on exit — same rule/format as
+        # the public shared-link list, via the shared session_revenue helper.
+        resp.revenue = f"{session_revenue(session.entry_time, session.exit_time):,}" if session.exit_time else "-"
         if session.location:
             resp.location_name = session.location.name
         response_items.append(resp)
