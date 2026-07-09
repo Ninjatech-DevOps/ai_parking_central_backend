@@ -143,9 +143,14 @@ async def get_occupancy_summary(
     # Re-aggregate per location (not per camera) to avoid double-counting
     # when multiple cameras at one location each report the full slot total.
     scans = await service.repo.latest_per_location(location_id, scoped_ids)
+    # Keep only the MOST RECENT scan per location. latest_per_location returns
+    # rows ordered by camera_id, so a location with a stale duplicate camera
+    # could otherwise win by UUID order and freeze the cards on an old reading;
+    # compare recorded_at so the live camera always wins.
     seen: dict = {}
     for s in scans:
-        if s.location_id not in seen:
+        cur = seen.get(s.location_id)
+        if cur is None or s.recorded_at > cur.recorded_at:
             seen[s.location_id] = s
     car = {
         "total": sum(s.car_total or 0 for s in seen.values()),
