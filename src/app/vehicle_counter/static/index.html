@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f6f8fb">
+<title>Vehicle Counter</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/vehicle-counter/static/app.css?v=1">
+</head>
+<body>
+
+<header class="hdr">
+  <div class="brand"><span class="brand-dot"></span> Vehicle Counter</div>
+  <nav class="nav">
+    <a href="/vehicle-counter/" class="active">Counter</a>
+    <a href="/vehicle-counter/records">Records</a>
+  </nav>
+</header>
+
+<main class="wrap">
+
+  <section class="stats">
+    <div class="tile tile-in" id="tile-in">
+      <div class="tile-val" id="stat-in">—</div>
+      <div class="tile-label">Total In</div>
+    </div>
+    <div class="tile tile-out" id="tile-out">
+      <div class="tile-val" id="stat-out">—</div>
+      <div class="tile-label">Total Out</div>
+    </div>
+    <div class="tile tile-inside" id="tile-inside">
+      <div class="tile-val" id="stat-inside">—</div>
+      <div class="tile-label">Inside</div>
+    </div>
+  </section>
+
+  <section class="pad">
+    <button class="tap tap-in" id="btn-in" type="button" aria-label="Record vehicle in">
+      <span class="tap-glyph" aria-hidden="true">+</span>
+      <span class="tap-label">Vehicle In</span>
+    </button>
+    <button class="tap tap-out" id="btn-out" type="button" aria-label="Record vehicle out">
+      <span class="tap-glyph" aria-hidden="true">−</span>
+      <span class="tap-label">Vehicle Out</span>
+    </button>
+  </section>
+
+  <h2 class="section-label">Last 10 entries</h2>
+
+  <div class="card">
+    <table class="resp">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Direction</th>
+          <th>Plate</th>
+          <th>Time</th>
+        </tr>
+      </thead>
+      <tbody id="recent">
+        <tr><td colspan="4" class="empty">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</main>
+
+<div id="toasts" aria-live="polite"></div>
+
+<script src="/vehicle-counter/static/common.js?v=1"></script>
+<script src="/vehicle-counter/static/counter.js?v=1"></script>
+</body>
+</html>

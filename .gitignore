@@ -65,3 +65,10 @@ graphify-out/
 
 # Snapshots
 data/snapshots/
+
+# Vehicle counter SQLite: ignore the database itself, but keep the directory
+# tracked so a fresh clone has ./data before `docker compose up` runs --
+# otherwise Docker creates the bind-mount target as root and the .db cannot be
+# copied off the host without sudo.
+data/vehicle_counter/*
+!data/vehicle_counter/.gitkeep
