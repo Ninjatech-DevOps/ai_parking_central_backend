@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import List
 
 from pydantic import field_validator
@@ -102,6 +103,12 @@ class Settings(BaseSettings):
     DEVICE_HEARTBEAT_INTERVAL_SECONDS: int = 60
     DEVICE_OFFLINE_THRESHOLD_SECONDS: int = 300
 
+    # --- Vehicle Counter (standalone SQLite) ---
+    # Lives inside the ./data bind mount so the file persists outside the
+    # container and can be copied off the host directly.
+    VEHICLE_COUNTER_DB_PATH: str = "data/vehicle_counter/vehicle_log.db"
+    VEHICLE_COUNTER_ENABLED: bool = True
+
     @property
     def database_url(self) -> str:
         return (
@@ -115,6 +122,15 @@ class Settings(BaseSettings):
             f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}"
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
         )
+
+    @property
+    def vehicle_counter_db_url(self) -> str:
+        """Absolute sqlite+aiosqlite URL.
+
+        Resolved to an absolute path so the DB lands in the same place whether
+        uvicorn runs from /app in Docker or from the repo root locally.
+        """
+        return f"sqlite+aiosqlite:///{Path(self.VEHICLE_COUNTER_DB_PATH).resolve()}"
 
     @property
     def is_production(self) -> bool:
