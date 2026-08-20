@@ -14,9 +14,30 @@ from src.app.middleware.logging import LoggingMiddleware
 from src.app.mqtt.client import start_mqtt, stop_mqtt
 from src.app.vehicle_counter.db import init_vehicle_counter_db
 from src.app.vehicle_counter.routes import STATIC_DIR as VEHICLE_COUNTER_STATIC_DIR
+from src.app.vehicle_counter.routes import STATIC_URL as VEHICLE_COUNTER_STATIC_URL
 from src.app.vehicle_counter.routes import router as vehicle_counter_router
 
 logger = logging.getLogger("ai_parking")
+
+
+class NoCacheStaticFiles(StaticFiles):
+    """Serve assets with revalidation forced.
+
+    StaticFiles sends an ETag but no Cache-Control, so a browser is free to
+    reuse a cached copy without asking. On an operator's tablet that means a
+    stale stylesheet or script can survive a deploy -- and a stale app.css
+    silently breaks capability gating, since the export button relies on a CSS
+    rule to stay hidden.
+    """
+
+    def is_not_modified(self, response_headers, request_headers) -> bool:
+        response_headers["Cache-Control"] = "no-cache, must-revalidate"
+        return super().is_not_modified(response_headers, request_headers)
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
 
 
 @asynccontextmanager
@@ -67,8 +88,8 @@ if settings.VEHICLE_COUNTER_ENABLED:
     # Mounted at a strict sub-path: a mount on the bare /vehicle-counter prefix
     # would swallow /vehicle-counter/api/* before the router ever sees it.
     app.mount(
-        "/vehicle-counter/static",
-        StaticFiles(directory=VEHICLE_COUNTER_STATIC_DIR),
+        VEHICLE_COUNTER_STATIC_URL,
+        NoCacheStaticFiles(directory=VEHICLE_COUNTER_STATIC_DIR),
         name="vehicle_counter_static",
     )
 

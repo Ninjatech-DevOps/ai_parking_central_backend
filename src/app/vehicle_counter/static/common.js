@@ -2,7 +2,10 @@
    Classic script (not an ES module) defining a single VC global. */
 
 var VC = (function () {
-  var API = "/vehicle-counter/api";
+  /* Derive the module's base path from where this page is served, so the
+     URL prefix lives only in routes.py and can be changed there alone. */
+  var BASE = location.pathname.replace(/\/+$/, "");
+  var API = BASE + "/api";
 
   /* --- Capabilities from URL params ---------------------------------- */
   /* Bare valueless params: ?edit, ?delete, ?edit&delete.
@@ -17,13 +20,45 @@ var VC = (function () {
     exp: params.has("export"),
   };
 
+  /* --- Token ----------------------------------------------------------- */
+  /* Keyed by the module's base path so two deployments on one host cannot
+     overwrite each other's token. */
+
+  var TOKEN_KEY = "vc_token:" + BASE;
+  var onAuthFailure = null;
+
+  function getToken() {
+    try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; }
+  }
+
+  function setToken(value) {
+    try { localStorage.setItem(TOKEN_KEY, value); } catch (e) { /* private mode */ }
+  }
+
+  function clearToken() {
+    try { localStorage.removeItem(TOKEN_KEY); } catch (e) { /* private mode */ }
+  }
+
   /* --- Fetch wrapper -------------------------------------------------- */
 
   async function api(path, opts) {
-    var res = await fetch(API + path, Object.assign(
-      { headers: { "Content-Type": "application/json" } },
-      opts || {}
-    ));
+    opts = opts || {};
+    var headers = Object.assign({ "Content-Type": "application/json" },
+                                opts.headers || {});
+
+    // Single choke point: every call site inherits the token and the 401
+    // handling below without any change of its own.
+    var token = getToken();
+    if (token) headers["Authorization"] = "Bearer " + token;
+
+    var res = await fetch(API + path, Object.assign({}, opts, { headers: headers }));
+
+    if (res.status === 401) {
+      clearToken();
+      if (onAuthFailure) onAuthFailure();
+      throw new Error("Session expired");
+    }
+
     if (!res.ok) {
       var msg = "Request failed (" + res.status + ")";
       try {
@@ -121,6 +156,11 @@ var VC = (function () {
     API: API,
     caps: caps,
     api: api,
+    getToken: getToken,
+    setToken: setToken,
+    clearToken: clearToken,
+    // Registered by app.js so an expired token swaps back to the login card.
+    setAuthFailureHandler: function (fn) { onAuthFailure = fn; },
     esc: esc,
     parseTs: parseTs,
     fmtTs: fmtTs,

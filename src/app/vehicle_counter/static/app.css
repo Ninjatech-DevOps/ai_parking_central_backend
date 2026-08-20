@@ -43,6 +43,14 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/* The [hidden] attribute is only display:none in the weak UA stylesheet, so
+   any explicit display rule (e.g. .btn-primary's inline-flex) silently beats
+   it. This makes hidden authoritative -- capability-gated controls such as the
+   export button rely on it. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -145,58 +153,179 @@ body {
   margin: 28px 0 10px;
 }
 
-/* --- Stat tiles -------------------------------------------------------- */
+/* --- Login -------------------------------------------------------------- */
 
-.stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+.login-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px 64px;
 }
 
-.tile {
-  position: relative;
+.login-card {
+  width: 100%;
+  max-width: 380px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow);
-  padding: 18px 12px 16px;
-  text-align: center;
-  overflow: hidden;
+  padding: 28px 24px 24px;
 }
 
-.tile::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 3px;
-  background: var(--accent);
-}
-
-.tile-in { background: var(--in-soft); border-color: var(--in-border); }
-.tile-out { background: var(--out-soft); border-color: var(--out-border); }
-.tile-inside { background: var(--amber-soft); border-color: #fde68a; }
-
-.tile-in::before { background: var(--in); }
-.tile-out::before { background: var(--out); }
-.tile-inside::before { background: var(--amber); }
-
-.tile-val {
-  font-family: var(--mono);
-  /* tabular-nums stops the tiles jittering as digit widths change */
-  font-variant-numeric: tabular-nums;
+.login-title {
+  margin: 0 0 4px;
+  font-size: 20px;
   font-weight: 800;
-  font-size: clamp(2rem, 11vw, 3.4rem);
-  line-height: 1.05;
+  letter-spacing: -0.02em;
+  text-align: center;
+}
+
+.login-hint {
+  margin: 0 0 20px;
+  font-size: 13px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.login-card .field input {
+  font-family: var(--font);
+  font-size: 15px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  padding: 11px 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+.login-card .field input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.13);
+}
+
+.login-error {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #be123c;
+  background: var(--out-soft);
+  border: 1px solid var(--out-border);
+  border-radius: var(--r-sm);
+  padding: 8px 11px;
+}
+
+.login-submit {
+  width: 100%;
+  margin-top: 18px;
+  justify-content: center;
+  padding: 11px 16px;
+  font-size: 14px;
+}
+
+/* --- Combined totals ---------------------------------------------------
+   Site-wide figures across both vehicle types. Deliberately larger than the
+   per-type numbers so they read from a distance, and centred so they are the
+   first thing seen on the page. */
+
+.totals {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+.tstat {
+  padding: 14px 8px 12px;
+}
+
+/* Two classes, so this beats the .cstat-val rule defined further down --
+   equal specificity would otherwise let source order win and shrink these
+   back to the per-type size. */
+.totals .tstat-val {
+  font-size: clamp(2.2rem, 9vw, 3.4rem);
   letter-spacing: -0.03em;
 }
 
-.tile-in .tile-val { color: var(--in); }
-.tile-out .tile-val { color: var(--out); }
-.tile-inside .tile-val { color: var(--amber); }
-
-.tile-label {
-  margin-top: 6px;
+.tstat .cstat-label {
   font-size: 10.5px;
+  margin-top: 5px;
+}
+
+/* --- Counter columns ---------------------------------------------------
+   One column per vehicle type. The column communicates the type; the button
+   colour communicates the direction. */
+
+.counters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.counter-col {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  min-width: 0;
+}
+
+.counter-title {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.counter-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.cstat {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px 6px 8px;
+  text-align: center;
+  min-width: 0;
+}
+
+.cstat-in { background: var(--in-soft); border-color: var(--in-border); }
+.cstat-out { background: var(--out-soft); border-color: var(--out-border); }
+.cstat-inside { background: var(--amber-soft); border-color: #fde68a; }
+
+.cstat-val {
+  display: block;
+  font-family: var(--mono);
+  /* tabular-nums stops the figures jittering as digit widths change */
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  font-size: clamp(1.4rem, 5vw, 2.1rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.cstat-in .cstat-val { color: var(--in); }
+.cstat-out .cstat-val { color: var(--out); }
+.cstat-inside .cstat-val { color: var(--amber); }
+
+.cstat-label {
+  display: block;
+  margin-top: 3px;
+  font-size: 9.5px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.09em;
@@ -205,12 +334,25 @@ body {
 
 @keyframes pop {
   0% { transform: scale(1); }
-  40% { transform: scale(1.09); }
+  40% { transform: scale(1.12); }
   100% { transform: scale(1); }
 }
 
-.tile.pulse .tile-val {
+.cstat.pulse .cstat-val {
   animation: pop 0.36s ease-out;
+}
+
+@media (max-width: 640px) {
+  /* Stack Car above 2W, each keeping its own buttons. */
+  .counters {
+    grid-template-columns: 1fr;
+  }
+
+  /* Stacked columns are full width, so the per-type figures would otherwise
+     grow toward the totals size. Cap them to preserve the hierarchy. */
+  .counter-col .cstat-val {
+    font-size: 1.7rem;
+  }
 }
 
 /* --- IN / OUT buttons -------------------------------------------------- */
@@ -218,8 +360,7 @@ body {
 .pad {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-top: 16px;
+  gap: 10px;
 }
 
 .tap {
@@ -228,9 +369,11 @@ body {
   border: none;
   color: #fff;
   cursor: pointer;
-  border-radius: 32px;
-  min-height: 168px;
-  padding: 20px 12px;
+  border-radius: 24px;
+  /* Two columns of buttons share the width, so each is a little shorter than
+     a full-width pad while staying well above a comfortable thumb target. */
+  min-height: 132px;
+  padding: 16px 10px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -270,7 +413,7 @@ body {
 }
 
 .tap-glyph {
-  font-size: clamp(3rem, 15vw, 4.4rem);
+  font-size: clamp(2.4rem, 9vw, 3.4rem);
   font-weight: 300;
   line-height: 1;
 }
@@ -533,6 +676,111 @@ td.editable input[type="datetime-local"] {
 
 .toolbar-title {
   margin-bottom: 10px;
+}
+
+.toolbar-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.refresh-icon {
+  display: inline-block;
+  font-size: 14px;
+  line-height: 1;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinning .refresh-icon {
+  animation: spin 0.6s linear infinite;
+}
+
+/* --- Filter bar -------------------------------------------------------- */
+
+.filterbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-sm);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+
+.filterbar .field {
+  min-width: 0;
+  flex: 1 1 170px;
+}
+
+.filterbar select,
+.filterbar input {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  padding: 7px 9px;
+  width: 100%;
+  min-width: 0;
+}
+
+.filterbar select {
+  font-family: var(--font);
+}
+
+.filterbar select:focus,
+.filterbar input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.13);
+}
+
+/* --- Vehicle type pill ------------------------------------------------- */
+
+.type-pill {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border-radius: 999px;
+  padding: 3px 9px;
+  background: var(--surface-2);
+  color: #475569;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.type-CAR {
+  color: #0f766e;
+  background: #ccfbf1;
+  box-shadow: inset 0 0 0 1px #99f6e4;
+}
+
+.type-TWO_WHEELER {
+  color: #6d28d9;
+  background: #ede9fe;
+  box-shadow: inset 0 0 0 1px #ddd6fe;
+}
+
+.field-full {
+  margin-top: 12px;
+}
+
+.field-full select {
+  font-family: var(--font);
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  padding: 8px 9px;
+  width: 100%;
 }
 
 .btn-primary {
@@ -849,29 +1097,6 @@ td.editable input[type="datetime-local"] {
 
   .ts-read {
     padding-left: 0;
-  }
-}
-
-@media (min-width: 721px) {
-  .stats {
-    gap: 14px;
-  }
-}
-
-/* On the wide records page the tiles are a summary, not the hero -- keep them
-   compact so the table stays the focus. */
-@media (min-width: 900px) {
-  .wrap-wide .stats {
-    grid-template-columns: repeat(3, minmax(0, 210px));
-  }
-
-  .wrap-wide .tile {
-    padding: 12px 14px 11px;
-    text-align: left;
-  }
-
-  .wrap-wide .tile-val {
-    font-size: 1.9rem;
   }
 }
 

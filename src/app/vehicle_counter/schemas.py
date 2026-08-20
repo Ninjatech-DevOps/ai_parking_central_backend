@@ -8,6 +8,21 @@ from pydantic import Field
 from src.app.schemas.base import BaseSchema
 
 
+class LoginRequest(BaseSchema):
+    """Single shared password -- there is no username."""
+
+    password: str
+
+
+class LoginResponse(BaseSchema):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in_days: int
+
+
+VehicleType = Literal["CAR", "TWO_WHEELER"]
+
+
 class VehicleEventCreate(BaseSchema):
     """Payload for one button press.
 
@@ -16,6 +31,7 @@ class VehicleEventCreate(BaseSchema):
     """
 
     direction: Literal["IN", "OUT"]
+    vehicle_type: VehicleType
     # Normally omitted so the server stamps the time; accepted for backfilling.
     timestamp: Optional[datetime] = None
 
@@ -29,6 +45,7 @@ class VehicleEventUpdate(BaseSchema):
     """
 
     direction: Optional[Literal["IN", "OUT"]] = None
+    vehicle_type: Optional[VehicleType] = None
     number_plate: Optional[str] = Field(None, max_length=30)
     timestamp: Optional[datetime] = None
 
@@ -36,6 +53,7 @@ class VehicleEventUpdate(BaseSchema):
 class VehicleEventResponse(BaseSchema):
     id: int
     direction: str
+    vehicle_type: str
     in_count: int
     out_count: int
     number_plate: Optional[str]
@@ -44,10 +62,18 @@ class VehicleEventResponse(BaseSchema):
     updated_at: datetime
 
 
-class VehicleCounterStats(BaseSchema):
+class TypeStats(BaseSchema):
     total_in: int
     total_out: int
     currently_inside: int
+
+
+class VehicleCounterStats(BaseSchema):
+    """Per-type figures, plus a combined block so nothing re-adds them."""
+
+    car: TypeStats
+    two_wheeler: TypeStats
+    overall: TypeStats
 
 
 class CounterPageData(BaseSchema):

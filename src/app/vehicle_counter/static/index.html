@@ -6,69 +6,244 @@
 <meta name="theme-color" content="#f6f8fb">
 <title>Vehicle Counter</title>
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="/vehicle-counter/static/app.css?v=1">
+<link rel="stylesheet" href="static/app.css?v=2">
 </head>
 <body>
 
 <header class="hdr">
   <div class="brand"><span class="brand-dot"></span> Vehicle Counter</div>
-  <nav class="nav">
-    <a href="/vehicle-counter/" class="active">Counter</a>
-    <a href="/vehicle-counter/records">Records</a>
-  </nav>
+  <button class="btn" id="logout" type="button" hidden>Sign out</button>
 </header>
 
-<main class="wrap">
+<!-- Shown until a valid token is held. Exactly one of #login-view /
+     #app-view is visible at any time. -->
+<section class="login-wrap" id="login-view" hidden>
+  <form class="login-card" id="login-form">
+    <h1 class="login-title">Vehicle Counter</h1>
+    <p class="login-hint">Enter the access password to continue.</p>
 
-  <section class="stats">
-    <div class="tile tile-in" id="tile-in">
-      <div class="tile-val" id="stat-in">—</div>
-      <div class="tile-label">Total In</div>
+    <!-- There is no username, but password managers and screen readers expect
+         one alongside a password field. Hidden and fixed, never submitted. -->
+    <input type="text" id="login-user" value="vehicle-counter" autocomplete="username"
+           readonly hidden aria-hidden="true" tabindex="-1">
+
+    <label class="field">
+      <span class="field-label">Password</span>
+      <input type="password" id="login-password" autocomplete="current-password"
+             placeholder="••••••••" autofocus>
+    </label>
+
+    <p class="login-error" id="login-error" hidden></p>
+
+    <button class="btn btn-primary login-submit" type="submit" id="login-submit">
+      Sign in
+    </button>
+  </form>
+</section>
+
+<main class="wrap wrap-wide" id="app-view" hidden>
+
+  <div id="banner"></div>
+
+  <!-- Combined totals across every vehicle type. Always the whole dataset,
+       never affected by the table filters below. -->
+  <section class="totals">
+    <div class="cstat tstat cstat-in" data-total="IN">
+      <span class="cstat-val tstat-val" id="total-in">—</span>
+      <span class="cstat-label">Total In</span>
     </div>
-    <div class="tile tile-out" id="tile-out">
-      <div class="tile-val" id="stat-out">—</div>
-      <div class="tile-label">Total Out</div>
+    <div class="cstat tstat cstat-out" data-total="OUT">
+      <span class="cstat-val tstat-val" id="total-out">—</span>
+      <span class="cstat-label">Total Out</span>
     </div>
-    <div class="tile tile-inside" id="tile-inside">
-      <div class="tile-val" id="stat-inside">—</div>
-      <div class="tile-label">Inside</div>
+    <div class="cstat tstat cstat-inside">
+      <span class="cstat-val tstat-val" id="total-inside">—</span>
+      <span class="cstat-label">Inside</span>
     </div>
   </section>
 
-  <section class="pad">
-    <button class="tap tap-in" id="btn-in" type="button" aria-label="Record vehicle in">
-      <span class="tap-glyph" aria-hidden="true">+</span>
-      <span class="tap-label">Vehicle In</span>
-    </button>
-    <button class="tap tap-out" id="btn-out" type="button" aria-label="Record vehicle out">
-      <span class="tap-glyph" aria-hidden="true">−</span>
-      <span class="tap-label">Vehicle Out</span>
-    </button>
+  <!-- Section 1: counter, one column per vehicle type ------------------- -->
+  <section class="counters">
+
+    <div class="counter-col" data-col="CAR">
+      <h2 class="counter-title">Car</h2>
+      <div class="counter-stats">
+        <div class="cstat cstat-in">
+          <span class="cstat-val" id="car-in">—</span>
+          <span class="cstat-label">In</span>
+        </div>
+        <div class="cstat cstat-out">
+          <span class="cstat-val" id="car-out">—</span>
+          <span class="cstat-label">Out</span>
+        </div>
+        <div class="cstat cstat-inside">
+          <span class="cstat-val" id="car-inside">—</span>
+          <span class="cstat-label">Inside</span>
+        </div>
+      </div>
+      <div class="pad">
+        <button class="tap tap-in" type="button"
+                data-vehicle-type="CAR" data-direction="IN"
+                aria-label="Record car in">
+          <span class="tap-glyph" aria-hidden="true">+</span>
+          <span class="tap-label">Car In</span>
+        </button>
+        <button class="tap tap-out" type="button"
+                data-vehicle-type="CAR" data-direction="OUT"
+                aria-label="Record car out">
+          <span class="tap-glyph" aria-hidden="true">−</span>
+          <span class="tap-label">Car Out</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="counter-col" data-col="TWO_WHEELER">
+      <h2 class="counter-title">2 Wheeler</h2>
+      <div class="counter-stats">
+        <div class="cstat cstat-in">
+          <span class="cstat-val" id="tw-in">—</span>
+          <span class="cstat-label">In</span>
+        </div>
+        <div class="cstat cstat-out">
+          <span class="cstat-val" id="tw-out">—</span>
+          <span class="cstat-label">Out</span>
+        </div>
+        <div class="cstat cstat-inside">
+          <span class="cstat-val" id="tw-inside">—</span>
+          <span class="cstat-label">Inside</span>
+        </div>
+      </div>
+      <div class="pad">
+        <button class="tap tap-in" type="button"
+                data-vehicle-type="TWO_WHEELER" data-direction="IN"
+                aria-label="Record two wheeler in">
+          <span class="tap-glyph" aria-hidden="true">+</span>
+          <span class="tap-label">2W In</span>
+        </button>
+        <button class="tap tap-out" type="button"
+                data-vehicle-type="TWO_WHEELER" data-direction="OUT"
+                aria-label="Record two wheeler out">
+          <span class="tap-glyph" aria-hidden="true">−</span>
+          <span class="tap-label">2W Out</span>
+        </button>
+      </div>
+    </div>
+
   </section>
 
-  <h2 class="section-label">Last 10 entries</h2>
+  <!-- Section 2: listing ----------------------------------------------- -->
+  <div class="toolbar">
+    <h2 class="section-label toolbar-title">All entries — newest first</h2>
+    <div class="toolbar-actions">
+      <button class="btn" id="refresh" type="button" title="Refresh now">
+        <span class="refresh-icon" aria-hidden="true">⟳</span> Refresh
+      </button>
+      <button class="btn btn-primary" id="open-export" type="button" hidden>
+        <span aria-hidden="true">↓</span> Export Excel
+      </button>
+    </div>
+  </div>
+
+  <div class="filterbar">
+    <label class="field">
+      <span class="field-label">Type</span>
+      <select id="f-type">
+        <option value="">All</option>
+        <option value="CAR">Car</option>
+        <option value="TWO_WHEELER">2 Wheeler</option>
+      </select>
+    </label>
+    <label class="field">
+      <span class="field-label">From</span>
+      <input type="datetime-local" id="f-from" step="1">
+    </label>
+    <label class="field">
+      <span class="field-label">To</span>
+      <input type="datetime-local" id="f-to" step="1">
+    </label>
+    <button class="btn" id="f-clear" type="button">Clear</button>
+  </div>
 
   <div class="card">
     <table class="resp">
       <thead>
         <tr>
           <th>#</th>
+          <th>Type</th>
           <th>Direction</th>
+          <th>In</th>
+          <th>Out</th>
           <th>Plate</th>
           <th>Time</th>
+          <th id="th-actions" hidden></th>
         </tr>
       </thead>
-      <tbody id="recent">
-        <tr><td colspan="4" class="empty">Loading…</td></tr>
+      <tbody id="rows">
+        <tr><td colspan="8" class="empty">Loading…</td></tr>
       </tbody>
     </table>
+
+    <div class="pager" id="pager" hidden>
+      <span class="pager-info" id="pager-info"></span>
+      <span class="pager-btns">
+        <button class="btn" id="prev" type="button">Previous</button>
+        <button class="btn" id="next" type="button">Next</button>
+      </span>
+    </div>
   </div>
 
 </main>
 
+<div class="modal" id="export-modal" hidden>
+  <div class="modal-backdrop" data-close-export></div>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="export-title">
+    <div class="modal-head">
+      <h3 class="modal-title" id="export-title">Export to Excel</h3>
+      <button class="modal-x" type="button" data-close-export aria-label="Close">×</button>
+    </div>
+
+    <p class="modal-hint">
+      Prefilled from the filters above. Leave a field empty for no limit.
+      Entries are exported oldest first.
+    </p>
+
+    <div class="field-grid">
+      <label class="field">
+        <span class="field-label">From</span>
+        <input type="datetime-local" id="export-from" step="1">
+      </label>
+      <label class="field">
+        <span class="field-label">To</span>
+        <input type="datetime-local" id="export-to" step="1">
+      </label>
+    </div>
+
+    <label class="field field-full">
+      <span class="field-label">Vehicle type</span>
+      <select id="export-type">
+        <option value="">All</option>
+        <option value="CAR">Car</option>
+        <option value="TWO_WHEELER">2 Wheeler</option>
+      </select>
+    </label>
+
+    <div class="quick-picks">
+      <button class="chip" type="button" data-range="today">Today</button>
+      <button class="chip" type="button" data-range="7">Last 7 days</button>
+      <button class="chip" type="button" data-range="30">Last 30 days</button>
+      <button class="chip" type="button" data-range="all">All time</button>
+    </div>
+
+    <div class="modal-foot">
+      <button class="btn" type="button" data-close-export>Cancel</button>
+      <button class="btn btn-primary" id="do-export" type="button">Download .xlsx</button>
+    </div>
+  </div>
+</div>
+
 <div id="toasts" aria-live="polite"></div>
 
-<script src="/vehicle-counter/static/common.js?v=1"></script>
-<script src="/vehicle-counter/static/counter.js?v=1"></script>
+<script src="static/common.js?v=2"></script>
+<script src="static/app.js?v=2"></script>
 </body>
 </html>

@@ -108,6 +108,11 @@ class Settings(BaseSettings):
     # container and can be copied off the host directly.
     VEHICLE_COUNTER_DB_PATH: str = "data/vehicle_counter/vehicle_log.db"
     VEHICLE_COUNTER_ENABLED: bool = True
+    # Single shared password for the module. Compared as plaintext: with one
+    # static credential a hash here adds no protection, since anyone who can
+    # read .env already has the secret.
+    VEHICLE_COUNTER_PASSWORD: str = "change-me"
+    VEHICLE_COUNTER_TOKEN_EXPIRE_DAYS: int = 30
 
     @property
     def database_url(self) -> str:

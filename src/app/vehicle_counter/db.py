@@ -102,7 +102,13 @@ async def init_vehicle_counter_db() -> None:
 # outside Alembic -- so tiny additive migrations are applied here instead.
 _ADDED_COLUMNS = {
     "deleted_at": "DATETIME",
+    # NOT NULL is accepted by ALTER TABLE ADD COLUMN because a DEFAULT is
+    # supplied -- that default is what backfills pre-existing rows as CAR.
+    "vehicle_type": "VARCHAR(12) NOT NULL DEFAULT 'CAR'",
 }
+
+# Columns above that are also indexed on the model.
+_INDEXED_COLUMNS = ("deleted_at", "vehicle_type")
 
 
 async def _add_missing_columns(conn) -> None:
@@ -117,10 +123,12 @@ async def _add_missing_columns(conn) -> None:
         )
         logger.info("Added column vehicle_events.%s", column)
 
-    if "deleted_at" not in existing:
+    # IF NOT EXISTS makes this idempotent, so it is safe to run every boot
+    # regardless of whether the column was just added.
+    for column in _INDEXED_COLUMNS:
         await conn.execute(
             text(
-                "CREATE INDEX IF NOT EXISTS ix_vehicle_events_deleted_at "
-                "ON vehicle_events (deleted_at)"
+                f"CREATE INDEX IF NOT EXISTS ix_vehicle_events_{column} "
+                f"ON vehicle_events ({column})"
             )
         )

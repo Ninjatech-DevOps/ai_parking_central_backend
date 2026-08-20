@@ -23,12 +23,32 @@ def _counts_for(direction: str) -> Tuple[int, int]:
     raise BadRequestException(detail="direction must be 'IN' or 'OUT'")
 
 
+VEHICLE_TYPES = ("CAR", "TWO_WHEELER")
+
+
+def _normalize_vehicle_type(value: str) -> str:
+    """Validate a vehicle type.
+
+    SQLite cannot add a CHECK constraint to the existing table, so this is the
+    real enforcement point for rows written to a pre-existing database.
+    """
+    normalized = (value or "").strip().upper()
+    if normalized not in VEHICLE_TYPES:
+        raise BadRequestException(
+            detail="vehicle_type must be 'CAR' or 'TWO_WHEELER'"
+        )
+    return normalized
+
+
 class VehicleEventService:
     def __init__(self, repo: VehicleEventRepository):
         self.repo = repo
 
     async def record(
-        self, direction: str, timestamp: Optional[datetime] = None
+        self,
+        direction: str,
+        vehicle_type: str,
+        timestamp: Optional[datetime] = None,
     ) -> VehicleEvent:
         """Log one button press."""
         normalized = (direction or "").strip().upper()
@@ -36,6 +56,7 @@ class VehicleEventService:
         return await self.repo.create(
             {
                 "direction": normalized,
+                "vehicle_type": _normalize_vehicle_type(vehicle_type),
                 "in_count": in_count,
                 "out_count": out_count,
                 "number_plate": None,
@@ -55,6 +76,11 @@ class VehicleEventService:
             normalized = (patch["direction"] or "").strip().upper()
             in_count, out_count = _counts_for(normalized)  # validates and derives
             data.update(direction=normalized, in_count=in_count, out_count=out_count)
+
+        # A plain editable field, unlike direction: changing the vehicle type
+        # never touches in_count/out_count.
+        if "vehicle_type" in patch:
+            data["vehicle_type"] = _normalize_vehicle_type(patch["vehicle_type"])
 
         if "number_plate" in patch:
             plate = patch["number_plate"]
@@ -80,17 +106,37 @@ class VehicleEventService:
             raise NotFoundException(detail=f"Vehicle event {event_id} not found")
 
     async def export_rows(
-        self, start: Optional[datetime] = None, end: Optional[datetime] = None
+        self,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+        vehicle_type: Optional[str] = None,
     ) -> List[VehicleEvent]:
         """Events for the Excel export, oldest first."""
         if start and end and start > end:
             raise BadRequestException(detail="start_date must be before end_date")
-        return await self.repo.list_for_export(start, end)
+        if vehicle_type:
+            vehicle_type = _normalize_vehicle_type(vehicle_type)
+        return await self.repo.list_for_export(start, end, vehicle_type)
 
     async def stats(self) -> dict:
-        total_in, total_out = await self.repo.totals()
+        """Per-type figures plus a combined block.
+
+        ``overall`` is computed here so the export totals row and the UI never
+        have to re-add the per-type numbers themselves.
+        """
+        by_type = await self.repo.totals_by_type()
+
+        def block(total_in: int, total_out: int) -> dict:
+            return {
+                "total_in": total_in,
+                "total_out": total_out,
+                "currently_inside": total_in - total_out,
+            }
+
+        car_in, car_out = by_type.get("CAR", (0, 0))
+        tw_in, tw_out = by_type.get("TWO_WHEELER", (0, 0))
         return {
-            "total_in": total_in,
-            "total_out": total_out,
-            "currently_inside": total_in - total_out,
+            "car": block(car_in, car_out),
+            "two_wheeler": block(tw_in, tw_out),
+            "overall": block(car_in + tw_in, car_out + tw_out),
         }

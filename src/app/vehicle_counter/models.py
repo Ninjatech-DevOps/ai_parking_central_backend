@@ -31,6 +31,13 @@ class VehicleEvent(VCBase):
     in_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     out_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    # "CAR" | "TWO_WHEELER". Independent of direction -- it does not take part
+    # in the in_count/out_count derivation. server_default backfills rows that
+    # predate this column (see db._ADDED_COLUMNS).
+    vehicle_type: Mapped[str] = mapped_column(
+        String(12), nullable=False, server_default="CAR", default="CAR", index=True
+    )
+
     # Optional -- left empty at tap time, filled in later from the records page.
     number_plate: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
@@ -59,10 +66,18 @@ class VehicleEvent(VCBase):
         DateTime(timezone=True), nullable=True, index=True
     )
 
+    # NOTE: SQLite cannot add a CHECK constraint to an existing table, so the
+    # vehicle_type constraint below only binds on freshly created databases.
+    # For an existing file the service layer is the enforcement point -- this
+    # asymmetry is expected, not a bug.
     __table_args__ = (
         CheckConstraint(
             "direction IN ('IN','OUT')",
             name="ck_vehicle_events_direction",
+        ),
+        CheckConstraint(
+            "vehicle_type IN ('CAR','TWO_WHEELER')",
+            name="ck_vehicle_events_vehicle_type",
         ),
         # Backstop for the core invariant, enforced on INSERT and UPDATE alike,
         # so a service-layer bug cannot persist an inconsistent row.
