@@ -25,33 +25,122 @@ var VC = (function () {
      overwrite each other's token. */
 
   var TOKEN_KEY = "vc_token:" + BASE;
-  var onAuthFailure = null;
+  var REFRESH_KEY = "vc_refresh:" + BASE;
+  var EXPIRY_KEY = "vc_expiry:" + BASE;
 
-  function getToken() {
-    try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; }
+  // Refresh this far ahead of expiry, so a request is never sent with a token
+  // that dies in flight.
+  var REFRESH_SKEW_MS = 60000;
+
+  var onAuthFailure = null;
+  var refreshInFlight = null;
+
+  function read(key) {
+    try { return localStorage.getItem(key) || ""; } catch (e) { return ""; }
   }
 
-  function setToken(value) {
-    try { localStorage.setItem(TOKEN_KEY, value); } catch (e) { /* private mode */ }
+  function write(key, value) {
+    try { localStorage.setItem(key, value); } catch (e) { /* private mode */ }
+  }
+
+  function drop(key) {
+    try { localStorage.removeItem(key); } catch (e) { /* private mode */ }
+  }
+
+  function getToken() { return read(TOKEN_KEY); }
+  function getRefreshToken() { return read(REFRESH_KEY); }
+
+  function expiresAt() {
+    return parseInt(read(EXPIRY_KEY) || "0", 10) || 0;
+  }
+
+  /** Store a login/refresh response. */
+  function setSession(data) {
+    write(TOKEN_KEY, data.access_token || "");
+    write(REFRESH_KEY, data.refresh_token || "");
+    // expires_in is seconds; keep an absolute timestamp so a reload can still
+    // tell how much life the token has left.
+    var ttl = (parseInt(data.expires_in, 10) || 0) * 1000;
+    write(EXPIRY_KEY, String(Date.now() + ttl));
   }
 
   function clearToken() {
-    try { localStorage.removeItem(TOKEN_KEY); } catch (e) { /* private mode */ }
+    drop(TOKEN_KEY);
+    drop(REFRESH_KEY);
+    drop(EXPIRY_KEY);
+  }
+
+  function tokenExpiringSoon() {
+    var at = expiresAt();
+    return at > 0 && Date.now() >= at - REFRESH_SKEW_MS;
+  }
+
+  /**
+   * Exchange the refresh token for a new pair.
+   *
+   * Single-flight: concurrent callers share one in-flight request. Without
+   * this, several requests hitting expiry together would each fire a refresh
+   * and the later ones would race on already-rotated tokens.
+   */
+  function refreshTokens() {
+    if (refreshInFlight) return refreshInFlight;
+
+    var token = getRefreshToken();
+    if (!token) return Promise.reject(new Error("No refresh token"));
+
+    refreshInFlight = fetch(API + "/auth/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: token }),
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error("Refresh failed");
+        return res.json();
+      })
+      .then(function (data) {
+        setSession(data);
+        return data;
+      })
+      .finally(function () {
+        refreshInFlight = null;
+      });
+
+    return refreshInFlight;
   }
 
   /* --- Fetch wrapper -------------------------------------------------- */
 
+  function send(path, opts) {
+    var headers = Object.assign({ "Content-Type": "application/json" },
+                                (opts && opts.headers) || {});
+    var token = getToken();
+    if (token) headers["Authorization"] = "Bearer " + token;
+    return fetch(API + path, Object.assign({}, opts || {}, { headers: headers }));
+  }
+
   async function api(path, opts) {
     opts = opts || {};
-    var headers = Object.assign({ "Content-Type": "application/json" },
-                                opts.headers || {});
+
+    // Proactive: renew before the token dies, so the operator never sees a
+    // failed request in the first place.
+    if (getRefreshToken() && tokenExpiringSoon()) {
+      try {
+        await refreshTokens();
+      } catch (e) { /* fall through; the reactive path below still applies */ }
+    }
 
     // Single choke point: every call site inherits the token and the 401
     // handling below without any change of its own.
-    var token = getToken();
-    if (token) headers["Authorization"] = "Bearer " + token;
+    var res = await send(path, opts);
 
-    var res = await fetch(API + path, Object.assign({}, opts, { headers: headers }));
+    // Reactive: a 401 despite the check above (clock skew, or a token
+    // invalidated server-side). Try once more with a fresh token.
+    if (res.status === 401 && getRefreshToken()) {
+      try {
+        await refreshTokens();
+        res = await send(path, opts);
+      } catch (e) { /* refresh failed; handled just below */ }
+    }
 
     if (res.status === 401) {
       clearToken();
@@ -73,6 +162,40 @@ var VC = (function () {
       throw new Error(msg);
     }
     return res.status === 204 ? null : res.json();
+  }
+
+  /**
+   * Same auth handling as api(), but returns the raw Response so a caller can
+   * read a binary body (e.g. an .xlsx download).
+   *
+   * Downloads must not hand-roll their own fetch: doing so skips the token and
+   * the refresh retry, which is exactly how the export ended up unauthorised.
+   */
+  async function apiRaw(path, opts) {
+    opts = opts || {};
+
+    if (getRefreshToken() && tokenExpiringSoon()) {
+      try {
+        await refreshTokens();
+      } catch (e) { /* fall through to the reactive path */ }
+    }
+
+    var res = await send(path, opts);
+
+    if (res.status === 401 && getRefreshToken()) {
+      try {
+        await refreshTokens();
+        res = await send(path, opts);
+      } catch (e) { /* handled below */ }
+    }
+
+    if (res.status === 401) {
+      clearToken();
+      if (onAuthFailure) onAuthFailure();
+      throw new Error("Session expired");
+    }
+
+    return res;
   }
 
   /* --- Escaping ------------------------------------------------------- */
@@ -156,9 +279,14 @@ var VC = (function () {
     API: API,
     caps: caps,
     api: api,
+    apiRaw: apiRaw,
     getToken: getToken,
-    setToken: setToken,
+    getRefreshToken: getRefreshToken,
+    setSession: setSession,
     clearToken: clearToken,
+    refreshTokens: refreshTokens,
+    tokenExpiringSoon: tokenExpiringSoon,
+    expiresAt: expiresAt,
     // Registered by app.js so an expired token swaps back to the login card.
     setAuthFailureHandler: function (fn) { onAuthFailure = fn; },
     esc: esc,

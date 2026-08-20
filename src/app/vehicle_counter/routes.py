@@ -24,13 +24,18 @@ from src.app.schemas.base import MessageResponse, PaginatedResponse
 from src.app.utils.export import generate_excel
 from src.app.utils.pagination import build_paginated_response, get_pagination_params
 from src.app.exceptions.base import BadRequestException
-from src.app.vehicle_counter.auth import authenticate, require_counter_auth
+from src.app.vehicle_counter.auth import (
+    authenticate,
+    refresh_token_pair,
+    require_counter_auth,
+)
 from src.app.vehicle_counter.db import get_vc_db
 from src.app.vehicle_counter.repository import VehicleEventRepository
 from src.app.vehicle_counter.schemas import (
     CounterPageData,
     LoginRequest,
     LoginResponse,
+    RefreshRequest,
     VehicleCounterStats,
     VehicleEventCreate,
     VehicleEventResponse,
@@ -149,13 +154,18 @@ auth_router = APIRouter(prefix="/api/auth", tags=["Vehicle Counter"])
 
 @auth_router.post("/login", response_model=LoginResponse)
 async def login(body: LoginRequest):
-    """Exchange the shared password for a long-lived token."""
-    token = authenticate(body.password)
-    return LoginResponse(
-        access_token=token,
-        token_type="bearer",
-        expires_in_days=settings.VEHICLE_COUNTER_TOKEN_EXPIRE_DAYS,
-    )
+    """Exchange the shared password for an access + refresh token pair."""
+    return LoginResponse(**authenticate(body.password))
+
+
+@auth_router.post("/refresh", response_model=LoginResponse)
+async def refresh(body: RefreshRequest):
+    """Exchange a refresh token for a new pair.
+
+    Deliberately on the unguarded router: refreshing happens precisely when
+    the access token has expired, so requiring one here would deadlock.
+    """
+    return LoginResponse(**refresh_token_pair(body.refresh_token))
 
 
 @auth_router.get("/me", response_model=MessageResponse)

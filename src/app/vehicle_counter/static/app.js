@@ -9,6 +9,9 @@
 (function () {
   var PAGE_SIZE = 10;
   var REFRESH_MS = 15000;
+  // How often to check whether the access token needs renewing. Independent
+  // of the data poll, and runs even while the tab is hidden.
+  var TOKEN_CHECK_MS = 30000;
 
   var tbody = document.getElementById("rows");
   var pager = document.getElementById("pager");
@@ -26,6 +29,7 @@
   var totalPages = 1;
   var colCount = VC.caps.del ? 8 : 7;
   var timer = null;
+  var tokenTimer = null;
   var busy = false;
 
   var TYPE_LABELS = { CAR: "Car", TWO_WHEELER: "2W" };
@@ -549,9 +553,10 @@
     exportBtn.textContent = "Preparing…";
 
     try {
-      // Binary response, so fetch a blob rather than going through VC.api.
-      var res = await fetch(
-        VC.API + "/events/export" + (params.toString() ? "?" + params : "")
+      // apiRaw, not a bare fetch: the download needs the same auth token and
+      // refresh handling as every other call, but a binary body back.
+      var res = await VC.apiRaw(
+        "/events/export" + (params.toString() ? "?" + params : "")
       );
       if (!res.ok) {
         var msg = "Export failed (" + res.status + ")";
@@ -601,13 +606,12 @@
   var passwordInput = document.getElementById("login-password");
   var loginError = document.getElementById("login-error");
   var loginSubmit = document.getElementById("login-submit");
-  var logoutBtn = document.getElementById("logout");
   var started = false;
 
   function showLogin(message) {
     clearInterval(timer);            // stop polling while signed out
+    clearInterval(tokenTimer);       // and stop renewing the session
     appView.hidden = true;
-    logoutBtn.hidden = true;
     loginView.hidden = false;
     started = false;
 
@@ -624,7 +628,6 @@
   function startApp() {
     loginView.hidden = true;
     appView.hidden = false;
-    logoutBtn.hidden = false;
 
     // Guard against double-booting (e.g. login while already started), which
     // would otherwise leave two refresh timers running.
@@ -634,6 +637,23 @@
     loadStats();
     load(page);
     scheduleRefresh();
+    scheduleTokenRenewal();
+  }
+
+  /* Keep the session alive independently of the data poll.
+
+     The data poll deliberately pauses while the tab is hidden, but the token
+     must not: a tablet left on a backgrounded tab should still be signed in
+     when the operator returns. */
+  function scheduleTokenRenewal() {
+    clearInterval(tokenTimer);
+    tokenTimer = setInterval(function () {
+      if (!VC.getRefreshToken()) return;
+      if (!VC.tokenExpiringSoon()) return;
+      VC.refreshTokens().catch(function () {
+        // Refresh token itself is dead -- the next API call surfaces it.
+      });
+    }, TOKEN_CHECK_MS);
   }
 
   // Any 401 from any call site lands here.
@@ -665,7 +685,7 @@
       if (!res.ok) {
         throw new Error(body.detail || "Sign in failed (" + res.status + ")");
       }
-      VC.setToken(body.access_token);
+      VC.setSession(body);
       startApp();
     } catch (err) {
       loginError.textContent = err.message;
@@ -675,11 +695,6 @@
       loginSubmit.disabled = false;
       loginSubmit.textContent = "Sign in";
     }
-  });
-
-  logoutBtn.addEventListener("click", function () {
-    VC.clearToken();
-    showLogin();
   });
 
   (async function boot() {

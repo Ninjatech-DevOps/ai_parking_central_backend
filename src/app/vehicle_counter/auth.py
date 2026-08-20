@@ -25,6 +25,10 @@ from src.app.exceptions.base import UnauthorizedException
 # accepted here.
 TOKEN_TYPE = "vehicle_counter"
 
+# Refresh tokens are long-lived but useless as credentials: they are rejected
+# by require_counter_auth, and only /auth/refresh accepts them.
+REFRESH_TYPE = "vehicle_counter_refresh"
+
 # Tokens carry no user identity; the subject is a fixed constant.
 TOKEN_SUBJECT = "vehicle_counter"
 
@@ -33,22 +37,51 @@ TOKEN_SUBJECT = "vehicle_counter"
 _bearer = HTTPBearer(auto_error=False)
 
 
-def create_counter_token() -> str:
-    """Issue a token valid for VEHICLE_COUNTER_TOKEN_EXPIRE_DAYS."""
+def _encode(token_type: str, lifetime: timedelta) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": TOKEN_SUBJECT,
-        "type": TOKEN_TYPE,
+        "type": token_type,
         "iat": now,
-        "exp": now + timedelta(days=settings.VEHICLE_COUNTER_TOKEN_EXPIRE_DAYS),
+        "exp": now + lifetime,
     }
     return jwt.encode(
         payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
     )
 
 
-def authenticate(password: str) -> str:
-    """Check the password and return a token.
+def access_token_lifetime() -> timedelta:
+    return timedelta(minutes=settings.VEHICLE_COUNTER_TOKEN_EXPIRE_MINUTES)
+
+
+def create_access_token() -> str:
+    """Short-lived token sent with every API call."""
+    return _encode(TOKEN_TYPE, access_token_lifetime())
+
+
+def create_refresh_token() -> str:
+    """Long-lived token accepted only by /auth/refresh."""
+    return _encode(
+        REFRESH_TYPE,
+        timedelta(days=settings.VEHICLE_COUNTER_REFRESH_EXPIRE_DAYS),
+    )
+
+
+def create_token_pair() -> dict:
+    """Both tokens plus the access lifetime in seconds.
+
+    The client needs the lifetime to schedule a refresh ahead of expiry.
+    """
+    return {
+        "access_token": create_access_token(),
+        "refresh_token": create_refresh_token(),
+        "token_type": "bearer",
+        "expires_in": int(access_token_lifetime().total_seconds()),
+    }
+
+
+def authenticate(password: str) -> dict:
+    """Check the password and return a fresh token pair.
 
     compare_digest rather than ``==`` so a wrong password takes the same time
     regardless of how many leading characters happened to match.
@@ -57,7 +90,23 @@ def authenticate(password: str) -> str:
     supplied = password or ""
     if not hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8")):
         raise UnauthorizedException(detail="Incorrect password")
-    return create_counter_token()
+    return create_token_pair()
+
+
+def refresh_token_pair(refresh_token: str) -> dict:
+    """Exchange a valid refresh token for a brand new pair.
+
+    A *new* refresh token is issued each time, which is what makes the 30-day
+    window slide with activity instead of being a hard cap from first login.
+
+    Note there is no server-side revocation list: the previous refresh token
+    remains valid until its own expiry. Rotation extends the session; it does
+    not invalidate what came before.
+    """
+    payload = decode_token(refresh_token or "")
+    if not payload or payload.get("type") != REFRESH_TYPE:
+        raise UnauthorizedException(detail="Invalid or expired refresh token")
+    return create_token_pair()
 
 
 async def require_counter_auth(

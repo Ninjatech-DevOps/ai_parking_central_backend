@@ -14,10 +14,16 @@ class LoginRequest(BaseSchema):
     password: str
 
 
+class RefreshRequest(BaseSchema):
+    refresh_token: str
+
+
 class LoginResponse(BaseSchema):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
-    expires_in_days: int
+    # Access token lifetime in seconds, so the client can refresh ahead of it.
+    expires_in: int
 
 
 VehicleType = Literal["CAR", "TWO_WHEELER"]

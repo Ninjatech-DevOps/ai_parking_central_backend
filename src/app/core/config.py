@@ -112,7 +112,11 @@ class Settings(BaseSettings):
     # static credential a hash here adds no protection, since anyone who can
     # read .env already has the secret.
     VEHICLE_COUNTER_PASSWORD: str = "change-me"
-    VEHICLE_COUNTER_TOKEN_EXPIRE_DAYS: int = 30
+    # Short-lived access token; the page refreshes it silently before expiry.
+    VEHICLE_COUNTER_TOKEN_EXPIRE_MINUTES: int = 15
+    # Refresh token lifetime. Rotated on every refresh, so this is effectively
+    # an inactivity window rather than a hard cap from first login.
+    VEHICLE_COUNTER_REFRESH_EXPIRE_DAYS: int = 30
 
     @property
     def database_url(self) -> str:
