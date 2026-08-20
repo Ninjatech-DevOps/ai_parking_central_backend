@@ -86,14 +86,35 @@ async def list_cameras(
     page: int = Query(1, ge=1),
     page_size: int = Query(None),
     device_id: uuid.UUID = Query(None),
-    service: CameraService = Depends(get_camera_service),
+    location_id: uuid.UUID = Query(
+        None,
+        description="All cameras at this location, across every device. "
+                    "Use for camera dropdowns.",
+    ),
     _: bool = Depends(PermissionChecker(Permission.DEVICES_VIEW)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
+    db: AsyncSession = Depends(get_db),
 ):
+    """List cameras, optionally narrowed to one device or one location.
+
+    Results are restricted to the caller's location scope (super admins see
+    everything). Note page_size is capped at MAX_PAGE_SIZE (100), so an
+    unfiltered listing may paginate — pass location_id for a dropdown.
+    """
+    if location_id:
+        verify_location_in_scope(location_id, user_location_ids)
+        scoped_ids = {location_id}
+    else:
+        scoped_ids = user_location_ids
+
     skip, limit = get_pagination_params(page, page_size)
     filters = {"is_active": True}
-    if device_id: filters["device_id"] = device_id
-    items = await service.get_all(skip=skip, limit=limit, filters=filters)
-    total = await service.count(filters=filters)
+    if device_id:
+        filters["device_id"] = device_id
+
+    repo = CameraRepository(db)
+    items = await repo.get_scoped(scoped_ids, skip=skip, limit=limit, filters=filters)
+    total = await repo.count_scoped(scoped_ids, filters=filters)
     return build_paginated_response(items, total, page, limit)
 
 

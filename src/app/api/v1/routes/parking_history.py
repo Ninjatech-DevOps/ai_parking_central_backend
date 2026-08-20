@@ -17,7 +17,11 @@ from src.app.core.constants import Permission
 from src.app.db.session import get_db
 from src.app.models.location import Location as LocationModel
 from src.app.repositories.parking_scan import ParkingScanRepository
-from src.app.schemas.parking_scan import ParkingScanResponse, ParkingScanUpdate
+from src.app.schemas.parking_scan import (
+    ParkingScanResponse,
+    ParkingScanUpdate,
+    build_parking_scan_response,
+)
 from src.app.schemas.base import MessageResponse, PaginatedResponse
 from src.app.services.parking_scan import ParkingScanService
 from src.app.services.parking_analytics import build_hourly_occupancy
@@ -68,6 +72,11 @@ async def list_scans(
     page_size: int = Query(20, ge=1, le=100),
     area_id: Optional[uuid.UUID] = Query(None),
     location_id: Optional[uuid.UUID] = Query(None),
+    camera_id: Optional[uuid.UUID] = Query(
+        None,
+        description="Filter to a single camera. A camera outside your scope "
+                    "yields no rows rather than an error.",
+    ),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     interval_minutes: Optional[int] = Query(None, ge=0, le=60, description="Sample interval in minutes (0=all rows, 5=one per 5min)"),
@@ -92,22 +101,15 @@ async def list_scans(
     iv = interval_minutes if interval_minutes and interval_minutes > 0 else None
 
     items = await service.get_filtered(
-        skip, limit, location_id, scoped_ids, start, end, iv
+        skip=skip, limit=limit, location_id=location_id, location_ids=scoped_ids,
+        start_date=start, end_date=end, interval_minutes=iv, camera_id=camera_id,
     )
     total = await service.count_filtered(
-        location_id, scoped_ids, start, end, iv
+        location_id=location_id, location_ids=scoped_ids,
+        start_date=start, end_date=end, interval_minutes=iv, camera_id=camera_id,
     )
 
-    response_items = []
-    for scan in items:
-        resp = ParkingScanResponse.model_validate(scan)
-        if scan.location:
-            resp.location_name = scan.location.name
-        if scan.camera:
-            resp.camera_label = scan.camera.position_label
-        if scan.device:
-            resp.device_name = scan.device.device_id
-        response_items.append(resp)
+    response_items = [build_parking_scan_response(scan) for scan in items]
 
     return build_paginated_response(response_items, total, page, limit)
 
@@ -124,6 +126,11 @@ async def _resolve_scope(area_id, user_location_ids, db):
 async def get_occupancy_summary(
     area_id: Optional[uuid.UUID] = Query(None),
     location_id: Optional[uuid.UUID] = Query(None),
+    camera_id: Optional[uuid.UUID] = Query(
+        None,
+        description="Narrow the tiles to a single camera. A camera outside "
+                    "your scope yields zeroes rather than an error.",
+    ),
     service: ParkingScanService = Depends(_get_service),
     _: bool = Depends(PermissionChecker(Permission.REPORTS_VIEW)),
     user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
@@ -131,37 +138,22 @@ async def get_occupancy_summary(
 ):
     """Current occupancy summary cards for the AI Parking History page.
 
-    Same logic as the parking PDF: take each location's latest scan, then sum
-    across scope. Single location -> that location's last entry; all -> sum of
-    every location's last entry. Honors the page's Area / Location filters.
+    Takes each CAMERA's latest scan and sums across every camera of every
+    device in scope. Cameras cover disjoint slot sets (a camera's car_total is
+    its own slots' capacity), so summing is correct and does not double-count.
+
+    Honors the page's Area / Location / Camera filters. Occupancy % is not
+    returned — derive it as occupied/total, guarding total == 0.
     """
     if location_id:
         verify_location_in_scope(location_id, user_location_ids)
     scoped_ids = await _resolve_scope(area_id, user_location_ids, db)
 
-    summary = await service.current_occupancy_summary(location_id, scoped_ids)
-    # Re-aggregate per location (not per camera) to avoid double-counting
-    # when multiple cameras at one location each report the full slot total.
-    scans = await service.repo.latest_per_location(location_id, scoped_ids)
-    # Keep only the MOST RECENT scan per location. latest_per_location returns
-    # rows ordered by camera_id, so a location with a stale duplicate camera
-    # could otherwise win by UUID order and freeze the cards on an old reading;
-    # compare recorded_at so the live camera always wins.
-    seen: dict = {}
-    for s in scans:
-        cur = seen.get(s.location_id)
-        if cur is None or s.recorded_at > cur.recorded_at:
-            seen[s.location_id] = s
-    car = {
-        "total": sum(s.car_total or 0 for s in seen.values()),
-        "occupied": sum(s.car_occupied or 0 for s in seen.values()),
-        "available": sum(s.car_available or 0 for s in seen.values()),
-    }
-    bike = {
-        "total": sum(s.two_wheeler_total or 0 for s in seen.values()),
-        "occupied": sum(s.two_wheeler_occupied or 0 for s in seen.values()),
-        "available": sum(s.two_wheeler_available or 0 for s in seen.values()),
-    }
+    summary = await service.current_occupancy_summary(
+        location_id=location_id, location_ids=scoped_ids, camera_id=camera_id,
+    )
+    car = summary["car"]
+    bike = summary["bike"]
     recorded_at = summary.get("latest_recorded_at")
 
     location_name = "All locations"
@@ -186,6 +178,7 @@ async def get_occupancy_summary(
 async def export_scans_csv(
     area_id: Optional[uuid.UUID] = Query(None),
     location_id: Optional[uuid.UUID] = Query(None),
+    camera_id: Optional[uuid.UUID] = Query(None, description="Filter to a single camera."),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     interval_minutes: Optional[int] = Query(None, ge=0, le=60),
@@ -194,12 +187,15 @@ async def export_scans_csv(
     user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
     db: AsyncSession = Depends(get_db),
 ):
+    if location_id:
+        verify_location_in_scope(location_id, user_location_ids)
     scoped_ids = await _resolve_scope(area_id, user_location_ids, db)
     start = _parse_date(start_date)
     end = _parse_date(end_date)
     iv = interval_minutes if interval_minutes and interval_minutes > 0 else None
     items = await service.get_filtered(
-        0, 50000, location_id, scoped_ids, start, end, iv
+        skip=0, limit=50000, location_id=location_id, location_ids=scoped_ids,
+        start_date=start, end_date=end, interval_minutes=iv, camera_id=camera_id,
     )
 
     output = io.StringIO()
@@ -207,6 +203,7 @@ async def export_scans_csv(
     writer.writerow([
         "Date", "Time", "Car Occupied", "Car Available", "Car Total",
         "2W Occupied", "2W Available", "2W Total", "Obstruction", "Location",
+        "Camera",
     ])
     for s in items:
         writer.writerow([
@@ -216,6 +213,7 @@ async def export_scans_csv(
             s.two_wheeler_occupied, s.two_wheeler_available, s.two_wheeler_total,
             "Yes" if s.has_obstruction else "No",
             s.location.name if s.location else "",
+            s.camera.position_label if s.camera else "",
         ])
 
     output.seek(0)
@@ -231,6 +229,7 @@ async def export_scans_csv(
 async def export_scans_excel(
     area_id: Optional[uuid.UUID] = Query(None),
     location_id: Optional[uuid.UUID] = Query(None),
+    camera_id: Optional[uuid.UUID] = Query(None, description="Filter to a single camera."),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     interval_minutes: Optional[int] = Query(None, ge=0, le=60),
@@ -239,16 +238,20 @@ async def export_scans_excel(
     user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
     db: AsyncSession = Depends(get_db),
 ):
+    if location_id:
+        verify_location_in_scope(location_id, user_location_ids)
     scoped_ids = await _resolve_scope(area_id, user_location_ids, db)
     start = _parse_date(start_date)
     end = _parse_date(end_date)
     iv = interval_minutes if interval_minutes and interval_minutes > 0 else None
     items = await service.get_filtered(
-        0, 50000, location_id, scoped_ids, start, end, iv
+        skip=0, limit=50000, location_id=location_id, location_ids=scoped_ids,
+        start_date=start, end_date=end, interval_minutes=iv, camera_id=camera_id,
     )
 
     headers = ["Date", "Time", "Car Occupied", "Car Available", "Car Total",
-               "2W Occupied", "2W Available", "2W Total", "Obstruction", "Location"]
+               "2W Occupied", "2W Available", "2W Total", "Obstruction", "Location",
+               "Camera"]
     rows = []
     for s in items:
         rows.append([
@@ -258,6 +261,7 @@ async def export_scans_excel(
             s.two_wheeler_occupied, s.two_wheeler_available, s.two_wheeler_total,
             "Yes" if s.has_obstruction else "No",
             s.location.name if s.location else "",
+            s.camera.position_label if s.camera else "",
         ])
 
     output = generate_excel("Parking History", headers, rows, "parking_history")
@@ -273,6 +277,7 @@ async def export_scans_excel(
 async def export_scans_pdf(
     area_id: Optional[uuid.UUID] = Query(None),
     location_id: Optional[uuid.UUID] = Query(None),
+    camera_id: Optional[uuid.UUID] = Query(None, description="Filter to a single camera."),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     interval_minutes: Optional[int] = Query(None, ge=0, le=60),
@@ -281,20 +286,27 @@ async def export_scans_pdf(
     user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
     db: AsyncSession = Depends(get_db),
 ):
+    if location_id:
+        verify_location_in_scope(location_id, user_location_ids)
     scoped_ids = await _resolve_scope(area_id, user_location_ids, db)
     start = _parse_date(start_date)
     end = _parse_date(end_date)
     iv = interval_minutes if interval_minutes and interval_minutes > 0 else None
     items = await service.get_filtered(
-        0, 5000, location_id, scoped_ids, start, end, iv
+        skip=0, limit=5000, location_id=location_id, location_ids=scoped_ids,
+        start_date=start, end_date=end, interval_minutes=iv, camera_id=camera_id,
     )
 
     # Occupancy records (one row per scan). Use the clean frame for thumbnails.
+    # Camera is folded into the location cell rather than given its own column:
+    # _records_table's widths are fixed to a 190mm total.
     rows = []
     for s in items:
+        loc_name = s.location.name if s.location else ""
+        cam_label = s.camera.position_label if s.camera else ""
         rows.append({
             "snapshot_url": _clean_frame_url(s.image_url),
-            "location": s.location.name if s.location else "",
+            "location": f"{loc_name} · {cam_label}" if (loc_name and cam_label) else (loc_name or cam_label),
             "date": _fmt_date(s.recorded_at),
             "time": _fmt_time(s.recorded_at),
             "occ_car": s.car_occupied,
@@ -305,29 +317,13 @@ async def export_scans_pdf(
             "tot_bike": s.two_wheeler_total,
         })
 
-    # Summary cards = latest scan per location in the filtered window,
-    # summed across locations (not per camera, to avoid double-counting).
-    seen_locs: dict = {}
-    for s in items:
-        if s.location_id not in seen_locs:
-            seen_locs[s.location_id] = s  # items sorted desc, first = latest
-    if seen_locs:
-        summary = {
-            "car": {
-                "total": sum(s.car_total or 0 for s in seen_locs.values()),
-                "occupied": sum(s.car_occupied or 0 for s in seen_locs.values()),
-                "available": sum(s.car_available or 0 for s in seen_locs.values()),
-            },
-            "bike": {
-                "total": sum(s.two_wheeler_total or 0 for s in seen_locs.values()),
-                "occupied": sum(s.two_wheeler_occupied or 0 for s in seen_locs.values()),
-                "available": sum(s.two_wheeler_available or 0 for s in seen_locs.values()),
-            },
-        }
-        recorded_at = items[0].recorded_at
-    else:
-        summary = {"car": {"total": 0, "occupied": 0, "available": 0}, "bike": {"total": 0, "occupied": 0, "available": 0}}
-        recorded_at = None
+    # Summary cards: each camera's latest scan in the window, summed across all
+    # cameras of all devices — same source of truth as the page's tiles.
+    summary = await service.current_occupancy_summary(
+        location_id=location_id, location_ids=scoped_ids,
+        since=start, until=end, camera_id=camera_id,
+    )
+    recorded_at = summary.get("latest_recorded_at")
 
     location_name = "All locations"
     if location_id:
@@ -367,14 +363,7 @@ async def update_scan(
     """Update parking scan numbers (inline edit from FE)."""
     data = body.model_dump(exclude_unset=True)
     scan = await service.update_scan(scan_id, data)
-    resp = ParkingScanResponse.model_validate(scan)
-    if scan.location:
-        resp.location_name = scan.location.name
-    if scan.camera:
-        resp.camera_label = scan.camera.position_label
-    if scan.device:
-        resp.device_name = scan.device.device_id
-    return resp
+    return build_parking_scan_response(scan)
 
 
 @router.delete("/{scan_id}", response_model=MessageResponse)

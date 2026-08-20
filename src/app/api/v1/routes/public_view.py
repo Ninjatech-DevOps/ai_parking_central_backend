@@ -24,8 +24,9 @@ from src.app.repositories.shared_link import SharedLinkRepository
 from src.app.schemas.anpr_record import AnprRecordResponse
 from src.app.schemas.anpr_session import AnprSessionResponse
 from src.app.schemas.base import PaginatedResponse
-from src.app.schemas.parking_scan import ParkingScanResponse
+from src.app.schemas.parking_scan import ParkingScanResponse, build_parking_scan_response
 from src.app.schemas.shared_link import PublicViewResponse
+from src.app.services.parking_scan import ParkingScanService
 from src.app.services.shared_link import SharedLinkService
 from src.app.services.anpr_analytics import session_revenue, build_anpr_report
 from src.app.services.parking_analytics import build_parking_report
@@ -63,7 +64,7 @@ async def get_public_parking_history(
     page_size: int = Query(20, ge=1, le=100),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
-    interval_minutes: Optional[int] = Query(None),
+    interval_minutes: Optional[int] = Query(None, ge=0, le=60),
     service: SharedLinkService = Depends(get_shared_link_service),
     db: AsyncSession = Depends(get_db),
 ):
@@ -85,14 +86,9 @@ async def get_public_parking_history(
         start_date=start, end_date=end, interval_minutes=interval_minutes,
     )
 
-    response_items = []
-    for scan in items:
-        resp = ParkingScanResponse.model_validate(scan)
-        if scan.location:
-            resp.location_name = scan.location.name
-        if scan.device:
-            resp.device_name = getattr(scan.device, "device_id", None)
-        response_items.append(resp)
+    # Shared builder also populates camera_label, which this route previously
+    # omitted (public rows returned camera_label: null).
+    response_items = [build_parking_scan_response(scan) for scan in items]
 
     return build_paginated_response(response_items, total, page, limit)
 
@@ -120,27 +116,22 @@ async def get_public_occupancy_summary(
     )
     report = build_parking_report(report_items)
 
-    # Summary cards — latest scan per location (not per camera, to avoid
-    # double-counting when multiple cameras cover the same slots).
-    # report_items are sorted by recorded_at DESC, so first seen = latest.
-    seen: dict = {}
-    for s in report_items:
-        if s.location_id not in seen:
-            seen[s.location_id] = s
-    car_occ = sum(s.car_occupied or 0 for s in seen.values())
-    car_avl = sum(s.car_available or 0 for s in seen.values())
-    car_tot = sum(s.car_total or 0 for s in seen.values())
-    bike_occ = sum(s.two_wheeler_occupied or 0 for s in seen.values())
-    bike_avl = sum(s.two_wheeler_available or 0 for s in seen.values())
-    bike_tot = sum(s.two_wheeler_total or 0 for s in seen.values())
+    # Summary cards — each CAMERA's latest scan in the window, summed across
+    # every camera of every device. Cameras cover disjoint slot sets, so this
+    # does not double-count. Same source of truth as the authenticated tiles.
+    summary = await ParkingScanService(repo).current_occupancy_summary(
+        location_ids=location_id_set or None, since=start, until=end,
+    )
+    car = summary["car"]
+    bike = summary["bike"]
 
     return {
-        "car_occupied": car_occ,
-        "car_available": car_avl,
-        "car_total": car_tot,
-        "two_wheeler_occupied": bike_occ,
-        "two_wheeler_available": bike_avl,
-        "two_wheeler_total": bike_tot,
+        "car_occupied": car["occupied"],
+        "car_available": car["available"],
+        "car_total": car["total"],
+        "two_wheeler_occupied": bike["occupied"],
+        "two_wheeler_available": bike["available"],
+        "two_wheeler_total": bike["total"],
         "report": report,
     }
 

@@ -27,6 +27,26 @@ class ParkingScanResponse(BaseSchema):
     model_config = {"from_attributes": True}
 
 
+def build_parking_scan_response(scan) -> "ParkingScanResponse":
+    """Hydrate the denormalized display fields from a ParkingScan ORM row.
+
+    location/camera/device are all lazy="selectin" on the model, so they are
+    already loaded — this only copies them onto the response.
+
+    Every route returning scans must go through here: camera_label has no
+    validator, so a route that forgets it silently returns null (which is
+    exactly what the public shared-link endpoint used to do).
+    """
+    resp = ParkingScanResponse.model_validate(scan)
+    if scan.location:
+        resp.location_name = scan.location.name
+    if scan.camera:
+        resp.camera_label = scan.camera.position_label
+    if scan.device:
+        resp.device_name = getattr(scan.device, "device_id", None)
+    return resp
+
+
 class ParkingScanUpdate(BaseSchema):
     """Inline-edit fields — all optional, only send what changed."""
     car_occupied: Optional[int] = None

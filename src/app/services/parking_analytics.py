@@ -30,27 +30,38 @@ def _peak_hour_display(hourly: dict) -> tuple:
 
 
 def build_hourly_occupancy(items) -> list:
-    """Hourly occupancy (10 AM - 6 PM): for each hour pick the scan with
-    the highest total occupancy. ``items`` are ParkingScan ORM rows."""
+    """Hourly occupancy (10 AM - 6 PM), summed across every camera.
+
+    For each hour we pick each CAMERA's busiest scan in that hour, then sum
+    those picks across cameras. Picking a single scan per hour across all
+    cameras (the old behaviour) reported one camera's numbers as the whole
+    site, so the chart contradicted the summary tiles on multi-camera
+    locations.
+
+    ``items`` are ParkingScan ORM rows.
+    """
     hourly = []
     for h in range(10, 19):
-        best = None
-        best_occ = -1
+        # camera_id -> that camera's busiest scan within this hour
+        best_by_cam: dict = {}
         for s in items:
             if not s.recorded_at:
                 continue
             t = s.recorded_at + IST
-            if t.hour == h:
-                occ = (s.car_occupied or 0) + (s.two_wheeler_occupied or 0)
-                if occ > best_occ:
-                    best_occ = occ
-                    best = s
+            if t.hour != h:
+                continue
+            occ = (s.car_occupied or 0) + (s.two_wheeler_occupied or 0)
+            cur = best_by_cam.get(s.camera_id)
+            if cur is None or occ > (cur.car_occupied or 0) + (cur.two_wheeler_occupied or 0):
+                best_by_cam[s.camera_id] = s
+
+        picks = best_by_cam.values()
         hourly.append({
             "hour": h,
-            "occ_car": best.car_occupied if best else 0,
-            "tot_car": best.car_total if best else 0,
-            "occ_bike": best.two_wheeler_occupied if best else 0,
-            "tot_bike": best.two_wheeler_total if best else 0,
+            "occ_car": sum(s.car_occupied or 0 for s in picks),
+            "tot_car": sum(s.car_total or 0 for s in picks),
+            "occ_bike": sum(s.two_wheeler_occupied or 0 for s in picks),
+            "tot_bike": sum(s.two_wheeler_total or 0 for s in picks),
         })
     return hourly
 

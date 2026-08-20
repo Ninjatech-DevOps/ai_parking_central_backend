@@ -22,9 +22,17 @@ class ParkingScanService:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         interval_minutes: Optional[int] = None,
+        camera_id: Optional[uuid.UUID] = None,
     ) -> List[ParkingScan]:
         return await self.repo.get_filtered(
-            skip, limit, location_id, location_ids, start_date, end_date, interval_minutes
+            skip=skip,
+            limit=limit,
+            location_id=location_id,
+            location_ids=location_ids,
+            start_date=start_date,
+            end_date=end_date,
+            interval_minutes=interval_minutes,
+            camera_id=camera_id,
         )
 
     async def count_filtered(
@@ -34,9 +42,15 @@ class ParkingScanService:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         interval_minutes: Optional[int] = None,
+        camera_id: Optional[uuid.UUID] = None,
     ) -> int:
         return await self.repo.count_filtered(
-            location_id, location_ids, start_date, end_date, interval_minutes
+            location_id=location_id,
+            location_ids=location_ids,
+            start_date=start_date,
+            end_date=end_date,
+            interval_minutes=interval_minutes,
+            camera_id=camera_id,
         )
 
     async def current_occupancy_summary(
@@ -45,16 +59,27 @@ class ParkingScanService:
         location_ids: Optional[Set[uuid.UUID]] = None,
         since: Optional[datetime] = None,
         until: Optional[datetime] = None,
+        camera_id: Optional[uuid.UUID] = None,
     ) -> Dict[str, Any]:
         """Current occupancy = each camera's latest scan, summed across scope.
 
-        Single location -> sum of that location's cameras. All locations -> sum
-        of every camera's latest entry. Shared source of truth for the parking
-        PDF summary cards and the ANPR PDF occupancy cards.
+        Single location -> sum of ALL that location's cameras, across every
+        device. All locations -> sum of every camera's latest entry. Cameras
+        cover disjoint slot sets, so summing does not double-count.
+
+        Shared source of truth for the AI Parking History summary tiles, the
+        parking PDF summary cards, and the public shared-link summary.
 
         `since`/`until`: only consider scans within this time window.
+        `camera_id`: narrow to a single camera (tiles then describe that camera).
         """
-        scans = await self.repo.latest_per_location(location_id, location_ids, since, until)
+        scans = await self.repo.latest_per_location(
+            location_id=location_id,
+            location_ids=location_ids,
+            since=since,
+            until=until,
+            camera_id=camera_id,
+        )
         car = {"total": 0, "occupied": 0, "available": 0}
         bike = {"total": 0, "occupied": 0, "available": 0}
         latest_recorded_at: Optional[datetime] = None
