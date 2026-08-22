@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Set
 from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.app.models.camera import Camera
 from src.app.models.parking_scan import ParkingScan
 from src.app.repositories.base import BaseRepository
 
@@ -96,6 +97,7 @@ class ParkingScanRepository(BaseRepository[ParkingScan]):
         since: Optional[datetime] = None,
         until: Optional[datetime] = None,
         camera_id: Optional[uuid.UUID] = None,
+        active_cameras_only: bool = False,
     ) -> List[ParkingScan]:
         """Return the most recent scan for each CAMERA in scope.
 
@@ -112,12 +114,34 @@ class ParkingScanRepository(BaseRepository[ParkingScan]):
         slots' capacity), so summing across cameras does NOT double-count.
 
         `since`/`until`: only consider scans within this time window.
+
+        `active_cameras_only`: when True, only cameras with is_active=True
+        contribute. Scans are grouped by the camera_id COLUMN, so without this a
+        camera that has been deactivated (or deleted, or re-registered under a
+        new id) keeps contributing its final reading forever — its capacity
+        stays in the totals indefinitely.
+
+        Deliberately an INNER join: it also drops scans whose camera_id no longer
+        resolves to a camera row and scans with a NULL camera_id, both of which
+        otherwise form phantom groups under DISTINCT ON.
+
+        Note this checks `is_active`, NOT `status`: production data has a
+        deactivated camera still carrying status=ACTIVE, so `is_active` is the
+        field that tracks reality.
+
+        Defaults to False so existing callers (the parking PDF, the public
+        shared-link summary and the public occupancy board) are unaffected;
+        only the AI Parking History summary tiles opt in today.
         """
         query = (
             select(ParkingScan)
             .distinct(ParkingScan.camera_id)
             .order_by(ParkingScan.camera_id, ParkingScan.recorded_at.desc(), ParkingScan.id.desc())
         )
+        if active_cameras_only:
+            query = query.join(Camera, Camera.id == ParkingScan.camera_id).where(
+                Camera.is_active.is_(True)
+            )
         query = self._apply_filters(
             query, location_id, location_ids, since, until, camera_id=camera_id
         )

@@ -138,9 +138,13 @@ async def get_occupancy_summary(
 ):
     """Current occupancy summary cards for the AI Parking History page.
 
-    Takes each CAMERA's latest scan and sums across every camera of every
+    Takes each ACTIVE camera's latest scan and sums across every camera of every
     device in scope. Cameras cover disjoint slot sets (a camera's car_total is
     its own slots' capacity), so summing is correct and does not double-count.
+
+    Deactivated cameras are excluded, so these tiles can report a lower total
+    than the PDF export and the public endpoints, which still count every
+    camera that has ever scanned.
 
     Honors the page's Area / Location / Camera filters. Occupancy % is not
     returned — derive it as occupied/total, guarding total == 0.
@@ -151,6 +155,10 @@ async def get_occupancy_summary(
 
     summary = await service.current_occupancy_summary(
         location_id=location_id, location_ids=scoped_ids, camera_id=camera_id,
+        # Tiles describe live capacity, so a decommissioned camera must not keep
+        # contributing its final reading. Scoped to these tiles on purpose — the
+        # PDF export below and the public surfaces still count every camera.
+        active_cameras_only=True,
     )
     car = summary["car"]
     bike = summary["bike"]

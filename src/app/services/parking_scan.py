@@ -60,6 +60,7 @@ class ParkingScanService:
         since: Optional[datetime] = None,
         until: Optional[datetime] = None,
         camera_id: Optional[uuid.UUID] = None,
+        active_cameras_only: bool = False,
     ) -> Dict[str, Any]:
         """Current occupancy = each camera's latest scan, summed across scope.
 
@@ -67,11 +68,17 @@ class ParkingScanService:
         device. All locations -> sum of every camera's latest entry. Cameras
         cover disjoint slot sets, so summing does not double-count.
 
-        Shared source of truth for the AI Parking History summary tiles, the
-        parking PDF summary cards, and the public shared-link summary.
+        Shared by the AI Parking History summary tiles, the parking PDF summary
+        cards, and the public shared-link summary — but no longer identical
+        across them: the tiles pass active_cameras_only=True, the others do not,
+        so a location with deactivated cameras reports a lower total on the
+        tiles than in the PDF or on the public board. That divergence is
+        intentional; the public-facing numbers were deliberately left alone.
 
         `since`/`until`: only consider scans within this time window.
         `camera_id`: narrow to a single camera (tiles then describe that camera).
+        `active_cameras_only`: exclude scans from cameras with is_active=False
+            (see ParkingScanRepository.latest_per_location for why this matters).
         """
         scans = await self.repo.latest_per_location(
             location_id=location_id,
@@ -79,6 +86,7 @@ class ParkingScanService:
             since=since,
             until=until,
             camera_id=camera_id,
+            active_cameras_only=active_cameras_only,
         )
         car = {"total": 0, "occupied": 0, "available": 0}
         bike = {"total": 0, "occupied": 0, "available": 0}
