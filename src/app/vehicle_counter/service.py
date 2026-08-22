@@ -40,6 +40,25 @@ def _normalize_vehicle_type(value: str) -> str:
     return normalized
 
 
+def normalize_type_filter(value: Optional[str]) -> Optional[str]:
+    """Normalize an optional vehicle_type *filter*.
+
+    Distinct from ``_normalize_vehicle_type``, which validates a value being
+    written: here a missing value and "ALL" both mean "no filter", so a UI can
+    send its select value through unchanged.
+    """
+    if not value:
+        return None
+    normalized = value.strip().upper()
+    if normalized == "ALL":
+        return None
+    if normalized not in VEHICLE_TYPES:
+        raise BadRequestException(
+            detail="vehicle_type must be 'CAR' or 'TWO_WHEELER'"
+        )
+    return normalized
+
+
 class VehicleEventService:
     def __init__(self, repo: VehicleEventRepository):
         self.repo = repo
@@ -118,13 +137,48 @@ class VehicleEventService:
             vehicle_type = _normalize_vehicle_type(vehicle_type)
         return await self.repo.list_for_export(start, end, vehicle_type)
 
-    async def stats(self) -> dict:
+    async def logs(
+        self,
+        skip: int,
+        limit: int,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+        vehicle_type: Optional[str] = None,
+    ) -> Tuple[List[VehicleEvent], int]:
+        """One page of events, newest first, plus the matching total.
+
+        The total is counted with the *same* filters as the page, or the pager
+        would report the unfiltered figure and offer pages that render empty.
+        Soft-deleted rows are excluded from both by the repository.
+        """
+        if start and end and start > end:
+            raise BadRequestException(detail="start_date must be before end_date")
+
+        vtype = normalize_type_filter(vehicle_type)
+        items = await self.repo.list_paginated(skip, limit, vtype, start, end)
+        total = await self.repo.count(vtype, start, end)
+        return items, total
+
+    async def stats(
+        self,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+    ) -> dict:
         """Per-type figures plus a combined block.
 
         ``overall`` is computed here so the export totals row and the UI never
         have to re-add the per-type numbers themselves.
+
+        With no bounds this is the all-time total, which is what the operator
+        page shows. Bounds narrow it to a window -- and over a window
+        ``currently_inside`` is a NET CHANGE in occupancy, not a live count: a
+        vehicle that entered before ``start`` and left inside the window
+        contributes only its OUT, so the figure can legitimately be negative.
         """
-        by_type = await self.repo.totals_by_type()
+        if start and end and start > end:
+            raise BadRequestException(detail="start_date must be before end_date")
+
+        by_type = await self.repo.totals_by_type(start, end)
 
         def block(total_in: int, total_out: int) -> dict:
             return {

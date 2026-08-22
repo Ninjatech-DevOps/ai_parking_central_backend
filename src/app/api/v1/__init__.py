@@ -1,5 +1,7 @@
 from fastapi import APIRouter
 
+from src.app.core.config import settings
+
 from src.app.api.v1.routes import (
     auth,
     user,
@@ -30,6 +32,7 @@ from src.app.api.v1.routes import (
     anpr_dashboard,
     parking_history,
     demo_report,
+    vehicle_counter_report,
 )
 
 api_v1_router = APIRouter(prefix="/api/v1")
@@ -63,3 +66,9 @@ api_v1_router.include_router(anpr_session.router)
 api_v1_router.include_router(anpr_dashboard.router)
 api_v1_router.include_router(parking_history.router)
 api_v1_router.include_router(demo_report.router)
+
+# Gated the same way main.py gates the counter module itself: with the module
+# disabled its SQLite table is never created, so registering this would turn a
+# clean 404 into an OperationalError.
+if settings.VEHICLE_COUNTER_ENABLED:
+    api_v1_router.include_router(vehicle_counter_report.router)

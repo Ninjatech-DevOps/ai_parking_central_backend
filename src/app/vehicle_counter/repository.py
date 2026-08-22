@@ -94,14 +94,27 @@ class VehicleEventRepository:
         result = await self.db.execute(query)
         return int(result.scalar_one())
 
-    async def totals_by_type(self) -> Dict[str, Tuple[int, int]]:
-        """Per-vehicle-type ``{type: (total_in, total_out)}`` in one query."""
+    async def totals_by_type(
+        self,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+        vehicle_type: Optional[str] = None,
+    ) -> Dict[str, Tuple[int, int]]:
+        """Per-vehicle-type ``{type: (total_in, total_out)}`` in one query.
+
+        With no arguments this is the all-time total. Bounds narrow it to a
+        window -- the same filters every other read path uses, so soft-deleted
+        rows stay excluded here too.
+        """
         query = self._apply_filters(
             select(
                 VehicleEvent.vehicle_type,
                 func.coalesce(func.sum(VehicleEvent.in_count), 0),
                 func.coalesce(func.sum(VehicleEvent.out_count), 0),
-            )
+            ),
+            vehicle_type,
+            start,
+            end,
         ).group_by(VehicleEvent.vehicle_type)
         result = await self.db.execute(query)
         return {row[0]: (int(row[1]), int(row[2])) for row in result.all()}

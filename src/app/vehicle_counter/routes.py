@@ -11,7 +11,7 @@ remain a UI affordance only -- they shape what the page shows, while the token
 is what actually controls access.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -23,12 +23,12 @@ from src.app.core.config import settings
 from src.app.schemas.base import MessageResponse, PaginatedResponse
 from src.app.utils.export import generate_excel
 from src.app.utils.pagination import build_paginated_response, get_pagination_params
-from src.app.exceptions.base import BadRequestException
 from src.app.vehicle_counter.auth import (
     authenticate,
     refresh_token_pair,
     require_counter_auth,
 )
+from src.app.vehicle_counter.datetime_utils import IST, parse_bound, to_ist
 from src.app.vehicle_counter.db import get_vc_db
 from src.app.vehicle_counter.repository import VehicleEventRepository
 from src.app.vehicle_counter.schemas import (
@@ -41,7 +41,7 @@ from src.app.vehicle_counter.schemas import (
     VehicleEventResponse,
     VehicleEventUpdate,
 )
-from src.app.vehicle_counter.service import VehicleEventService
+from src.app.vehicle_counter.service import VehicleEventService, normalize_type_filter
 
 # Single source of truth for the module's URL prefix. Change it here only --
 # main.py derives the static mount from it, and the page derives its asset and
@@ -58,65 +58,9 @@ def get_vc_service(db: AsyncSession = Depends(get_vc_db)) -> VehicleEventService
     return VehicleEventService(repo=VehicleEventRepository(db))
 
 
-# Timestamps are stored in UTC; the UI and the export both present IST so the
-# spreadsheet matches what the operator saw on screen.
-IST = timezone(timedelta(hours=5, minutes=30))
-
-
-def _to_ist(value: Optional[datetime]) -> Optional[datetime]:
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(IST)
-
-
 # Human-readable labels for the spreadsheet, which is read by people rather
 # than parsed by code.
 _TYPE_LABELS = {"CAR": "Car", "TWO_WHEELER": "2 Wheeler"}
-
-
-def _normalize_type_filter(value: Optional[str]) -> Optional[str]:
-    """Normalize an optional vehicle_type filter.
-
-    Empty string and "ALL" both mean no filter, so the UI can send its select
-    value through unchanged.
-    """
-    if not value:
-        return None
-    normalized = value.strip().upper()
-    if normalized in ("", "ALL"):
-        return None
-    if normalized not in ("CAR", "TWO_WHEELER"):
-        raise BadRequestException(
-            detail="vehicle_type must be 'CAR' or 'TWO_WHEELER'"
-        )
-    return normalized
-
-
-def _parse_bound(value: Optional[str], end_of_day: bool) -> Optional[datetime]:
-    """Parse a date or datetime the browser sent, interpreted as IST.
-
-    Accepts 'YYYY-MM-DD' and 'YYYY-MM-DDTHH:MM[:SS]'. A bare date used as the
-    upper bound covers the whole day.
-    """
-    if not value:
-        return None
-    text = value.strip().replace("Z", "")
-    try:
-        if len(text) == 10:  # date only
-            parsed = datetime.strptime(text, "%Y-%m-%d")
-            if end_of_day:
-                parsed = parsed.replace(hour=23, minute=59, second=59)
-        else:
-            parsed = datetime.fromisoformat(text)
-    except ValueError:
-        raise BadRequestException(detail=f"Invalid date value: {value}")
-
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=IST)
-    # Stored timestamps are naive UTC, so compare against naive UTC.
-    return parsed.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 # --- Pages ---------------------------------------------------------------
@@ -222,9 +166,9 @@ async def list_events(
     service: VehicleEventService = Depends(get_vc_service),
 ):
     """Paginated event list, newest first."""
-    vtype = _normalize_type_filter(vehicle_type)
-    start = _parse_bound(start_date, end_of_day=False)
-    end = _parse_bound(end_date, end_of_day=True)
+    vtype = normalize_type_filter(vehicle_type)
+    start = parse_bound(start_date, end_of_day=False)
+    end = parse_bound(end_date, end_of_day=True)
 
     skip, limit = get_pagination_params(page, page_size)
     items = await service.repo.list_paginated(skip, limit, vtype, start, end)
@@ -243,9 +187,9 @@ async def export_events(
     service: VehicleEventService = Depends(get_vc_service),
 ):
     """Export events in a date range to .xlsx, oldest first."""
-    start = _parse_bound(start_date, end_of_day=False)
-    end = _parse_bound(end_date, end_of_day=True)
-    vtype = _normalize_type_filter(vehicle_type)
+    start = parse_bound(start_date, end_of_day=False)
+    end = parse_bound(end_date, end_of_day=True)
+    vtype = normalize_type_filter(vehicle_type)
 
     events = await service.export_rows(start, end, vtype)
 
@@ -260,8 +204,8 @@ async def export_events(
         bucket = tally.setdefault(event.vehicle_type, [0, 0])
         bucket[0] += event.in_count
         bucket[1] += event.out_count
-        local = _to_ist(event.timestamp)
-        created = _to_ist(event.created_at)
+        local = to_ist(event.timestamp)
+        created = to_ist(event.created_at)
         rows.append([
             event.id,
             _TYPE_LABELS.get(event.vehicle_type, event.vehicle_type),
