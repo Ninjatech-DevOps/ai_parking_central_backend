@@ -30,6 +30,7 @@ from src.app.api.v1.routes import (
     anpr_dashboard,
     parking_history,
     demo_report,
+    vehicle_movement,
 )
 
 api_v1_router = APIRouter(prefix="/api/v1")
@@ -63,3 +64,4 @@ api_v1_router.include_router(anpr_session.router)
 api_v1_router.include_router(anpr_dashboard.router)
 api_v1_router.include_router(parking_history.router)
 api_v1_router.include_router(demo_report.router)
+api_v1_router.include_router(vehicle_movement.router)

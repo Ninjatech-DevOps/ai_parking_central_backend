@@ -23,6 +23,18 @@ class AnprDirection(str, enum.Enum):
     OUT = "OUT"
 
 
+class MovementDirection(str, enum.Enum):
+    """Direction of a vehicle_movements row.
+
+    Same two values as AnprDirection but a separate type: movements are counted
+    independently of plate recognition, and tying them to the ANPR enum would
+    couple two modules that are meant to change on their own schedules.
+    """
+
+    IN = "IN"
+    OUT = "OUT"
+
+
 class DeviceStatus(str, enum.Enum):
     ONLINE = "ONLINE"
     OFFLINE = "OFFLINE"
@@ -260,6 +272,13 @@ class Permission:
     ANPR_VIEW = "anpr:view"
     ANPR_CONFIGURE = "anpr:configure"
     ANPR_EXPORT = "anpr:export"
+
+    # Vehicle Movements — in/out counting, independent of ANPR
+    VEHICLE_MOVEMENTS_VIEW = "vehicle_movements:view"
+    VEHICLE_MOVEMENTS_CREATE = "vehicle_movements:create"
+    VEHICLE_MOVEMENTS_EDIT = "vehicle_movements:edit"
+    VEHICLE_MOVEMENTS_DELETE = "vehicle_movements:delete"
+    VEHICLE_MOVEMENTS_EXPORT = "vehicle_movements:export"
 
     # Shared Links — CRUD (super_admin only)
     SHARED_LINKS_VIEW = "shared_links:view"

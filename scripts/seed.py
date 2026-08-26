@@ -74,6 +74,11 @@ ALL_PERMISSIONS = [
     ("anpr", "view"),
     ("anpr", "configure"),
     ("anpr", "export"),
+    ("vehicle_movements", "view"),
+    ("vehicle_movements", "create"),
+    ("vehicle_movements", "edit"),
+    ("vehicle_movements", "delete"),
+    ("vehicle_movements", "export"),
 ]
 
 # Only SUPER_ADMIN is seeded as a system role.

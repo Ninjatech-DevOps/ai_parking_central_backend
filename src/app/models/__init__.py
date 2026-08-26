@@ -28,6 +28,7 @@ from src.app.models.anpr_camera_config import AnprCameraConfig
 from src.app.models.anpr_record import AnprRecord
 from src.app.models.anpr_session import AnprSession
 from src.app.models.parking_scan import ParkingScan
+from src.app.models.vehicle_movement import VehicleMovement
 
 __all__ = [
     "State", "City", "Taluka", "Village", "Area",
@@ -38,4 +39,5 @@ __all__ = [
     "SharedLink",
     "AnprCameraConfig", "AnprRecord", "AnprSession",
     "ParkingScan",
+    "VehicleMovement",
 ]
