@@ -4,13 +4,14 @@ Independent of the ANPR module: these rows come from whatever counts vehicles
 at a site, whether or not plate recognition is involved.
 """
 
+import io
 import math
 import uuid
 from datetime import datetime, time, timedelta, timezone
 from enum import Enum
 from typing import Optional, Set
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +21,7 @@ from src.app.api.deps import (
     verify_location_in_scope,
 )
 from src.app.core.constants import MovementDirection, Permission, VehicleType
+from src.app.exceptions.base import BadRequestException
 from src.app.db.session import get_db
 from src.app.models.location import Location as LocationModel
 from src.app.repositories.vehicle_movement import VehicleMovementRepository
@@ -32,6 +34,7 @@ from src.app.schemas.vehicle_movement import (
     build_movement_response,
 )
 from src.app.services.vehicle_movement import VehicleMovementService
+from src.app.services import vehicle_movement_import as importer
 from src.app.utils.pagination import get_pagination_params
 
 router = APIRouter(prefix="/vehicle-movements", tags=["Vehicle Movements"])
@@ -182,6 +185,100 @@ async def create_movement(
     # Re-read with labels so the created row carries the same fields the list
     # returns — the frontend can render it without a second request.
     return build_movement_response(*await service.get_with_labels(movement.id))
+
+
+# An 8 MB ceiling on the upload: the daily report is ~30 KB, so anything near
+# this is not a Summary Report and should be rejected before openpyxl opens it.
+MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+
+
+@router.post("/import", status_code=201)
+async def import_movements(
+    file: UploadFile = File(..., description="The daily Summary Report .xlsx"),
+    location_id: uuid.UUID = Form(
+        ...,
+        description="Site these movements belong to. The spreadsheet contains "
+                    "no location, so it must be given here.",
+    ),
+    report_date: datetime = Form(
+        ...,
+        description="The day the report covers, YYYY-MM-DD. Read from the "
+                    "payload rather than the filename, which can be stale.",
+    ),
+    replace: bool = Form(
+        False,
+        description="Replace this location's movements for that date. Without "
+                    "it, a day that already has data is rejected.",
+    ),
+    camera_id: Optional[uuid.UUID] = Form(None),
+    _: bool = Depends(PermissionChecker(Permission.VEHICLE_MOVEMENTS_CREATE)),
+    user_location_ids: Optional[Set[uuid.UUID]] = Depends(get_user_location_ids),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a daily Summary Report and store its movements.
+
+    One sheet per vehicle type, one row per movement; a row carrying both In
+    and Out counts as two movements. The response reports what was read per
+    sheet, and warns when the sheet's own Total row disagrees with the rows
+    actually present.
+    """
+    verify_location_in_scope(location_id, user_location_ids)
+
+    # Scope alone is not enough: a Super Admin resolves to "all locations", so
+    # verify_location_in_scope waves through an id that does not exist. Without
+    # this check the insert fails on the foreign key at commit — after the 201
+    # has already been built — and the caller is told a failed import succeeded.
+    exists = (await db.execute(
+        select(LocationModel.id).where(LocationModel.id == location_id)
+    )).scalar_one_or_none()
+    if not exists:
+        raise BadRequestException(detail=f"No location with id {location_id}")
+
+    if not (file.filename or "").lower().endswith((".xlsx", ".xlsm")):
+        raise BadRequestException(detail="Upload an .xlsx file.")
+
+    payload = await file.read()
+    if not payload:
+        raise BadRequestException(detail="The uploaded file is empty.")
+    if len(payload) > MAX_UPLOAD_BYTES:
+        raise BadRequestException(
+            detail=f"File is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
+        )
+
+    day = report_date.date() if isinstance(report_date, datetime) else report_date
+
+    try:
+        per_sheet = importer.parse_workbook(io.BytesIO(payload), day)
+    except importer.WorkbookError as exc:
+        raise BadRequestException(detail=str(exc))
+
+    result = importer.summarise(per_sheet)
+    if not result["total_movements"]:
+        raise BadRequestException(
+            detail="No movement rows found in the file."
+        )
+
+    vehicle_types = sorted({v for v, _, _ in per_sheet.values()})
+    existing = await importer.count_existing(db, location_id, day, vehicle_types)
+    if existing and not replace:
+        raise BadRequestException(
+            detail=f"{existing} movements already exist for this location on "
+                   f"{day}. Send replace=true to overwrite them."
+        )
+
+    removed = await importer.store(
+        db, location_id, day, per_sheet, camera_id=camera_id, replace=replace,
+    )
+
+    return {
+        "success": True,
+        "location_id": str(location_id),
+        "report_date": day.isoformat(),
+        "imported": result["total_movements"],
+        "replaced": removed,
+        "sheets": result["sheets"],
+        "warnings": result["warnings"],
+    }
 
 
 @router.get("/{movement_id}", response_model=VehicleMovementResponse)

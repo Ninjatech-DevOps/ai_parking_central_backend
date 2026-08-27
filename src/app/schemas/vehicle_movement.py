@@ -45,6 +45,14 @@ class VehicleMovementResponse(BaseResponse):
     out_count: int = 0
 
 
+class VehicleMovementTypeTotals(BaseSchema):
+    """In/Out totals for one vehicle type."""
+
+    total_in: int = 0
+    total_out: int = 0
+    net: int = 0
+
+
 class VehicleMovementSummary(BaseSchema):
     """Totals for the whole filtered window, not just the current page."""
 
@@ -53,6 +61,14 @@ class VehicleMovementSummary(BaseSchema):
     # in − out over the window. Negative means more vehicles left than entered,
     # which is normal for a window that opens mid-day.
     net: int = 0
+
+    # Per-type breakdown for the Car and Two Wheeler cards. The three fields
+    # above stay as the combined figures, so anything already reading them is
+    # unaffected — these are additions, not a replacement.
+    car: VehicleMovementTypeTotals = Field(default_factory=VehicleMovementTypeTotals)
+    two_wheeler: VehicleMovementTypeTotals = Field(
+        default_factory=VehicleMovementTypeTotals
+    )
 
 
 class VehicleMovementListResponse(BaseSchema):

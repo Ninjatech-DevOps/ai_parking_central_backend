@@ -1,11 +1,14 @@
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
-from src.app.core.constants import MovementDirection
+from src.app.core.constants import MovementDirection, VehicleType
 from src.app.exceptions.base import NotFoundException
 from src.app.models.vehicle_movement import VehicleMovement
 from src.app.repositories.vehicle_movement import VehicleMovementRepository
-from src.app.schemas.vehicle_movement import VehicleMovementSummary
+from src.app.schemas.vehicle_movement import (
+    VehicleMovementSummary,
+    VehicleMovementTypeTotals,
+)
 
 
 class VehicleMovementService:
@@ -49,13 +52,42 @@ class VehicleMovementService:
         return await self.repo.count_filtered(**filters)
 
     async def summary(self, **filters: Any) -> VehicleMovementSummary:
-        totals = await self.repo.direction_totals(**filters)
-        total_in = totals.get(MovementDirection.IN.value, 0)
-        total_out = totals.get(MovementDirection.OUT.value, 0)
+        """Combined In/Out totals plus a per-vehicle-type breakdown.
+
+        One query serves all three sets of cards — the frontend previously had
+        to make an extra windowed request per vehicle type to get the same
+        numbers.
+        """
+        totals = await self.repo.totals_by_type_and_direction(**filters)
+
+        def totals_for(vehicle_type: Optional[str]) -> VehicleMovementTypeTotals:
+            """Sum one direction across the rows matching vehicle_type.
+
+            A vehicle_type of None means "every type", which is how the
+            combined figures are produced from the same grouped result.
+            """
+            def count(direction: str) -> int:
+                return sum(
+                    n for (vtype, dirn), n in totals.items()
+                    if dirn == direction
+                    and (vehicle_type is None or vtype == vehicle_type)
+                )
+
+            total_in = count(MovementDirection.IN.value)
+            total_out = count(MovementDirection.OUT.value)
+            return VehicleMovementTypeTotals(
+                total_in=total_in,
+                total_out=total_out,
+                net=total_in - total_out,
+            )
+
+        combined = totals_for(None)
         return VehicleMovementSummary(
-            total_in=total_in,
-            total_out=total_out,
-            net=total_in - total_out,
+            total_in=combined.total_in,
+            total_out=combined.total_out,
+            net=combined.net,
+            car=totals_for(VehicleType.CAR.value),
+            two_wheeler=totals_for(VehicleType.TWO_WHEELER.value),
         )
 
     async def update(self, movement_id: uuid.UUID, data: Dict[str, Any]) -> VehicleMovement:

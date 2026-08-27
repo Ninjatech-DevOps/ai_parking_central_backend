@@ -36,38 +36,25 @@ import re
 import sys
 import uuid
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
-import openpyxl
-from sqlalchemy import delete, func, select
+from sqlalchemy import select
 
-from src.app.core.constants import MovementDirection, VehicleType
 from src.app.db.session import async_session_factory
+from src.app.services import vehicle_movement_import as importer
 
 # Import all models to register them
 import src.app.models  # noqa: F401
 
 from src.app.models.camera import Camera
 from src.app.models.location import Location
-from src.app.models.vehicle_movement import VehicleMovement
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger("import_movements")
 
-# Times in the report are local wall-clock. Stored in UTC like every other
-# timestamp in this database.
-IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
-
-# Sheet name -> vehicle type. Matched on a substring of the lowercased name so
-# "Four Wheeler", "Four  Wheeler" and "4 Wheeler" all land in the same place.
-SHEET_VEHICLE_TYPES: List[Tuple[str, str]] = [
-    ("two", VehicleType.TWO_WHEELER.value),
-    ("2 wheel", VehicleType.TWO_WHEELER.value),
-    ("bike", VehicleType.TWO_WHEELER.value),
-    ("four", VehicleType.CAR.value),
-    ("4 wheel", VehicleType.CAR.value),
-    ("car", VehicleType.CAR.value),
-]
+# Parsing lives in the shared service so the CLI and the upload endpoint can
+# never disagree about how a sheet is read.
+IST = importer.IST
 
 MONTHS = {
     m.lower(): i
@@ -110,81 +97,6 @@ def parse_date_from_filename(path: Path) -> datetime.date:
         raise ImportError_(f"Invalid date in filename {name!r}: {exc}") from exc
 
 
-def vehicle_type_for_sheet(sheet_name: str) -> Optional[str]:
-    lowered = sheet_name.lower()
-    for needle, vtype in SHEET_VEHICLE_TYPES:
-        if needle in lowered:
-            return vtype
-    return None
-
-
-def _cell_marker(value) -> str:
-    return value.strip().lower() if isinstance(value, str) else ""
-
-
-def read_sheet(ws, report_date: datetime.date) -> Tuple[List[Dict], Dict]:
-    """Return (movements, report) for one sheet.
-
-    A row may carry an 'In', an 'Out', or BOTH — a row with both means one
-    vehicle entered and another left at the same second, and counts as two
-    movements. That reading is what makes the computed totals match the
-    sheet's own Total row.
-    """
-    movements: List[Dict] = []
-    report = {"rows_read": 0, "blank": 0, "skipped": [], "stated_in": None,
-              "stated_out": None}
-
-    for row_no, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-        time_cell = row[0] if len(row) > 0 else None
-        in_cell = row[1] if len(row) > 1 else None
-        out_cell = row[2] if len(row) > 2 else None
-
-        if time_cell is None and in_cell is None and out_cell is None:
-            report["blank"] += 1
-            continue
-
-        # The trailing 'Total' row carries the sheet's own figures. Keep them
-        # for validation rather than importing them.
-        if isinstance(time_cell, str) and "total" in time_cell.lower():
-            report["stated_in"] = _as_int(in_cell)
-            report["stated_out"] = _as_int(out_cell)
-            continue
-
-        if isinstance(time_cell, datetime.datetime):
-            time_cell = time_cell.time()
-        if not isinstance(time_cell, datetime.time):
-            report["skipped"].append((row_no, f"not a time: {time_cell!r}"))
-            continue
-
-        marks_in = _cell_marker(in_cell) == "in"
-        marks_out = _cell_marker(out_cell) == "out"
-        if not marks_in and not marks_out:
-            report["skipped"].append((row_no, "neither In nor Out"))
-            continue
-
-        recorded_at = datetime.datetime.combine(
-            report_date, time_cell, tzinfo=IST
-        ).astimezone(datetime.timezone.utc)
-
-        if marks_in:
-            movements.append({"recorded_at": recorded_at,
-                              "direction": MovementDirection.IN.value})
-        if marks_out:
-            movements.append({"recorded_at": recorded_at,
-                              "direction": MovementDirection.OUT.value})
-        report["rows_read"] += 1
-
-    return movements, report
-
-
-def _as_int(value) -> Optional[int]:
-    if isinstance(value, (int, float)):
-        return int(value)
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
-    return None
-
-
 # --------------------------------------------------------------------------
 # Database
 # --------------------------------------------------------------------------
@@ -223,19 +135,6 @@ async def resolve_camera(db, camera_id: Optional[str], location) -> Optional[uui
     return cam.id
 
 
-async def existing_count(db, location_id, day_start, day_end, vehicle_types) -> int:
-    return (await db.execute(
-        select(func.count())
-        .select_from(VehicleMovement)
-        .where(
-            VehicleMovement.location_id == location_id,
-            VehicleMovement.recorded_at >= day_start,
-            VehicleMovement.recorded_at <= day_end,
-            VehicleMovement.vehicle_type.in_(vehicle_types),
-        )
-    )).scalar_one()
-
-
 # --------------------------------------------------------------------------
 # Entry point
 # --------------------------------------------------------------------------
@@ -251,62 +150,24 @@ async def run(args) -> int:
     )
     logger.info("Report date: %s (times read as IST)", report_date)
 
-    workbook = openpyxl.load_workbook(path, data_only=True)
+    try:
+        per_sheet = importer.parse_workbook(path, report_date)
+    except importer.WorkbookError as exc:
+        raise ImportError_(str(exc)) from exc
 
-    per_sheet: Dict[str, Tuple[str, List[Dict], Dict]] = {}
-    for worksheet in workbook.worksheets:
-        vtype = vehicle_type_for_sheet(worksheet.title)
-        if not vtype:
-            logger.warning("Sheet %r — no vehicle type in the name, skipped",
-                           worksheet.title)
-            continue
-        movements, report = read_sheet(worksheet, report_date)
-        per_sheet[worksheet.title] = (vtype, movements, report)
-
-    if not per_sheet:
-        raise ImportError_(
-            "No usable sheets. Expected names containing 'Two Wheeler' or "
-            "'Four Wheeler'."
-        )
-
-    # ---- report and validate before touching the database ----
-    total_rows = 0
-    mismatches = []
-    for title, (vtype, movements, report) in per_sheet.items():
-        ins = sum(1 for m in movements if m["direction"] == MovementDirection.IN.value)
-        outs = len(movements) - ins
-        total_rows += len(movements)
+    result = importer.summarise(per_sheet)
+    for sheet in result["sheets"]:
         logger.info(
             "Sheet %-14r -> %-12s  IN=%-4d OUT=%-4d  (%d movements from %d rows)",
-            title, vtype, ins, outs, len(movements), report["rows_read"],
+            sheet["sheet"], sheet["vehicle_type"], sheet["total_in"],
+            sheet["total_out"], sheet["movements"], sheet["rows_read"],
         )
-        for row_no, why in report["skipped"]:
-            logger.warning("  row %d skipped — %s", row_no, why)
+    for warning in result["warnings"]:
+        logger.warning("  %s", warning)
 
-        # The sheet states its own totals. Disagreement means the file's SUM
-        # is stale or rows were added outside it — worth knowing before the
-        # numbers reach a dashboard.
-        for label, stated, computed in (
-            ("IN", report["stated_in"], ins),
-            ("OUT", report["stated_out"], outs),
-        ):
-            if stated is not None and stated != computed:
-                mismatches.append((title, label, stated, computed))
-                logger.warning(
-                    "  Total row says %s=%d but the rows contain %d — "
-                    "importing the %d actual rows",
-                    label, stated, computed, computed,
-                )
-
+    total_rows = result["total_movements"]
     if not total_rows:
         raise ImportError_("Nothing to import — no movement rows found.")
-
-    day_start = datetime.datetime.combine(
-        report_date, datetime.time.min, tzinfo=IST
-    ).astimezone(datetime.timezone.utc)
-    day_end = datetime.datetime.combine(
-        report_date, datetime.time.max, tzinfo=IST
-    ).astimezone(datetime.timezone.utc)
 
     async with async_session_factory() as db:
         try:
@@ -315,8 +176,8 @@ async def run(args) -> int:
             logger.info("Location: %s (%s)", location.name, location.id)
 
             vehicle_types = sorted({v for v, _, _ in per_sheet.values()})
-            already = await existing_count(
-                db, location.id, day_start, day_end, vehicle_types
+            already = await importer.count_existing(
+                db, location.id, report_date, vehicle_types
             )
             if already and not args.replace:
                 raise ImportError_(
@@ -331,35 +192,19 @@ async def run(args) -> int:
                     f"delete {already} and insert " if already else "insert ",
                     total_rows,
                 )
-                return 1 if mismatches else 0
+                return 1 if result["warnings"] else 0
 
-            if already:
-                await db.execute(
-                    delete(VehicleMovement).where(
-                        VehicleMovement.location_id == location.id,
-                        VehicleMovement.recorded_at >= day_start,
-                        VehicleMovement.recorded_at <= day_end,
-                        VehicleMovement.vehicle_type.in_(vehicle_types),
-                    )
-                )
-                logger.info("Replaced: deleted %d existing movements", already)
-
-            for _, (vtype, movements, _) in per_sheet.items():
-                db.add_all([
-                    VehicleMovement(
-                        location_id=location.id,
-                        camera_id=camera_id,
-                        vehicle_type=vtype,
-                        direction=m["direction"],
-                        recorded_at=m["recorded_at"],
-                    )
-                    for m in movements
-                ])
+            removed = await importer.store(
+                db, location.id, report_date, per_sheet,
+                camera_id=camera_id, replace=args.replace,
+            )
+            if removed:
+                logger.info("Replaced: deleted %d existing movements", removed)
 
             await db.commit()
             logger.info("Imported %d movements for %s on %s",
                         total_rows, location.name, report_date)
-            return 1 if mismatches else 0
+            return 1 if result["warnings"] else 0
 
         except Exception:
             await db.rollback()

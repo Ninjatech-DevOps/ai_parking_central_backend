@@ -106,22 +106,29 @@ class VehicleMovementRepository(BaseRepository[VehicleMovement]):
         result = await self.db.execute(query)
         return result.scalar_one()
 
-    async def direction_totals(self, **filters: Any) -> Dict[str, int]:
-        """IN and OUT counts for the whole filtered window.
+    async def totals_by_type_and_direction(
+        self, **filters: Any
+    ) -> Dict[Tuple[str, str], int]:
+        """Counts keyed by (vehicle_type, direction) for the filtered window.
 
         Grouped in SQL rather than counted in Python so the totals describe
-        every matching row, not just the page currently being viewed.
+        every matching row, not just the page currently being viewed. Grouping
+        by both columns at once means the per-type cards and the combined
+        figures come from a single query.
         """
-        query = select(VehicleMovement.direction, func.count()).select_from(
-            VehicleMovement
-        )
+        query = select(
+            VehicleMovement.vehicle_type, VehicleMovement.direction, func.count()
+        ).select_from(VehicleMovement)
         query = self._apply_filters(query, **filters)
-        query = query.group_by(VehicleMovement.direction)
+        query = query.group_by(VehicleMovement.vehicle_type, VehicleMovement.direction)
         result = await self.db.execute(query)
-        # SQLAlchemy hands back MovementDirection members, not plain strings —
-        # str() on one gives "MovementDirection.IN", so read .value instead and
-        # key the dict on "IN" / "OUT" as callers expect.
+        # SQLAlchemy hands back enum members, not plain strings — str() on one
+        # gives "MovementDirection.IN", so read .value and key on "CAR"/"IN" as
+        # callers expect.
         return {
-            getattr(direction, "value", direction): count
-            for direction, count in result.all()
+            (
+                getattr(vehicle_type, "value", vehicle_type),
+                getattr(direction, "value", direction),
+            ): count
+            for vehicle_type, direction, count in result.all()
         }

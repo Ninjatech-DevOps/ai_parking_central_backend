@@ -153,9 +153,23 @@ exists elsewhere in this codebase and is deliberately avoided here.
 
 | Field | Type | Description |
 |---|---|---|
-| `total_in` | `integer` | Count of `IN` rows in the window |
-| `total_out` | `integer` | Count of `OUT` rows in the window |
+| `total_in` | `integer` | Count of `IN` rows in the window, all vehicle types |
+| `total_out` | `integer` | Count of `OUT` rows in the window, all vehicle types |
 | `net` | `integer` | `total_in − total_out`. Negative is normal for a window that opens mid-day |
+| `car` | `VehicleMovementTypeTotals` | Same three figures for `CAR` only |
+| `two_wheeler` | `VehicleMovementTypeTotals` | Same three figures for `TWO_WHEELER` only |
+
+**`VehicleMovementTypeTotals`**
+
+| Field | Type | Description |
+|---|---|---|
+| `total_in` | `integer` | `IN` rows of this vehicle type |
+| `total_out` | `integer` | `OUT` rows of this vehicle type |
+| `net` | `integer` | `total_in − total_out` |
+
+`car` and `two_wheeler` always sum to the three combined fields above, so the
+Car and Two Wheeler cards and the overall figures come from one request. The
+combined fields are unchanged — the per-type objects are additions.
 
 **`VehicleMovementResponse`**
 
@@ -226,7 +240,13 @@ Authorization: Bearer <token>
   "page": 1,
   "page_size": 3,
   "total_pages": 2,
-  "summary": { "total_in": 3, "total_out": 2, "net": 1 }
+  "summary": {
+    "total_in": 238,
+    "total_out": 207,
+    "net": 31,
+    "car":         { "total_in": 129, "total_out": 113, "net": 16 },
+    "two_wheeler": { "total_in": 109, "total_out": 94,  "net": 15 }
+  }
 }
 ```
 
@@ -297,7 +317,87 @@ Content-Type: application/json
 
 ---
 
-### 4.3 `GET /api/v1/vehicle-movements/{movement_id}` — fetch one
+### 4.3 `POST /api/v1/vehicle-movements/import` — upload a daily report
+
+**Purpose.** Upload the daily Summary Report spreadsheet and store its movements
+in one request. Same parser as the CLI script — they share
+`services/vehicle_movement_import.py`, so the two can never disagree.
+
+**Permission:** `vehicle_movements:create`
+**Content type:** `multipart/form-data`
+
+#### Form fields
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `file` | file (`.xlsx` / `.xlsm`) | **yes** | — | The Summary Report. Max 8 MB |
+| `location_id` | `uuid` | **yes** | — | Site these movements belong to. The spreadsheet contains no location, so it must be given here. `400` if it does not exist, `403` if outside your scope |
+| `report_date` | `date` (`YYYY-MM-DD`) | **yes** | — | The day the report covers. Taken from the payload, never the filename |
+| `replace` | `boolean` | no | `false` | Replace this location's movements for that date |
+| `camera_id` | `uuid` | no | `null` | Applied to every imported row |
+
+**Why `report_date` is a payload field.** The filename is not trustworthy — the
+sample file was named `25th Aug 2026` but was generated on the 26th. Requiring the
+date explicitly means a whole day can never be filed under the wrong date because
+an export template was stale.
+
+#### Response `201`
+
+| Field | Type | Description |
+|---|---|---|
+| `success` | `boolean` | Always `true` on 201 |
+| `location_id` | `string` | Echo of the location written to |
+| `report_date` | `string` | Echo of the date written to |
+| `imported` | `integer` | Movements inserted |
+| `replaced` | `integer` | Existing rows deleted first (`0` unless `replace=true`) |
+| `sheets` | `array` | Per-sheet breakdown — see below |
+| `warnings` | `string[]` | Skipped rows, and any disagreement with the sheet's own Total row |
+
+Each entry in `sheets`: `sheet`, `vehicle_type`, `total_in`, `total_out`,
+`movements`, `rows_read`.
+
+```json
+{
+  "success": true,
+  "location_id": "74d2b082-dfae-486b-a8d8-91439d5133a7",
+  "report_date": "2026-08-25",
+  "imported": 445,
+  "replaced": 0,
+  "sheets": [
+    { "sheet": "Two Wheeler",  "vehicle_type": "TWO_WHEELER",
+      "total_in": 109, "total_out": 94,  "movements": 203, "rows_read": 201 },
+    { "sheet": "Four Wheeler", "vehicle_type": "CAR",
+      "total_in": 129, "total_out": 113, "movements": 242, "rows_read": 240 }
+  ],
+  "warnings": [
+    "Four Wheeler: Total row says OUT=51 but the rows contain 113 — importing the 113 actual rows"
+  ]
+}
+```
+
+#### Errors
+
+| Code | When |
+|---|---|
+| `400` | Day already imported and `replace` not sent; unknown `location_id`; not an `.xlsx`; empty or oversized file; no usable sheets; no movement rows |
+| `403` | `location_id` outside your scope, or missing permission |
+| `422` | `report_date` not a valid date, or a required field missing |
+
+#### Example
+
+```bash
+curl -X POST "$API/api/v1/vehicle-movements/import" \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@Summary Report _ 25th Aug 2026.xlsx" \
+  -F "location_id=74d2b082-dfae-486b-a8d8-91439d5133a7" \
+  -F "report_date=2026-08-25"
+```
+
+The whole import is one transaction — a failure part-way leaves nothing behind.
+
+---
+
+### 4.4 `GET /api/v1/vehicle-movements/{movement_id}` — fetch one
 
 **Purpose.** Read a single movement, e.g. to populate an edit form.
 
@@ -311,7 +411,7 @@ Content-Type: application/json
 
 ---
 
-### 4.4 `PATCH /api/v1/vehicle-movements/{movement_id}` — correct a movement
+### 4.5 `PATCH /api/v1/vehicle-movements/{movement_id}` — correct a movement
 
 **Purpose.** Fix a miscounted or mistyped row.
 
@@ -336,7 +436,7 @@ All fields optional; omitted fields are left unchanged.
 
 ---
 
-### 4.5 `DELETE /api/v1/vehicle-movements/{movement_id}` — remove a movement
+### 4.6 `DELETE /api/v1/vehicle-movements/{movement_id}` — remove a movement
 
 **Purpose.** Remove a row recorded in error. This is a **hard delete** — the row is
 gone, not soft-deleted.
@@ -508,4 +608,5 @@ mismatch, and `2` on an error — so a cron job can alert on `1`.
 | `alembic/versions/k5e6f7g8h9i0_add_vehicle_movements.py` | Migration |
 | `src/app/core/constants.py` | `MovementDirection`, five permission keys |
 | `scripts/seed.py` | Permission seeding |
-| `scripts/import_vehicle_movements.py` | Daily Excel import |
+| `scripts/import_vehicle_movements.py` | Daily Excel import (CLI) |
+| `src/app/services/vehicle_movement_import.py` | Shared workbook parsing and storage |
