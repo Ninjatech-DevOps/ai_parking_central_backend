@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.app.models.anpr_record import AnprRecord
 from src.app.models.location import Location
 from src.app.repositories.base import BaseRepository
+from src.app.utils.timewindow import ist_hours_between
 
 
 class AnprRecordRepository(BaseRepository[AnprRecord]):
@@ -25,9 +26,10 @@ class AnprRecordRepository(BaseRepository[AnprRecord]):
         direction: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
+        hours_ist: Optional[tuple] = None,
     ) -> List[AnprRecord]:
         query = select(AnprRecord)
-        query = self._apply_filters(query, location_id, location_ids, number_plate, vehicle_type, direction, start_date, end_date)
+        query = self._apply_filters(query, location_id, location_ids, number_plate, vehicle_type, direction, start_date, end_date, hours_ist)
         query = query.order_by(AnprRecord.recorded_at.desc()).offset(skip).limit(limit)
         result = await self.db.execute(query)
         return list(result.scalars().all())
@@ -41,9 +43,10 @@ class AnprRecordRepository(BaseRepository[AnprRecord]):
         direction: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
+        hours_ist: Optional[tuple] = None,
     ) -> int:
         query = select(func.count()).select_from(AnprRecord)
-        query = self._apply_filters(query, location_id, location_ids, number_plate, vehicle_type, direction, start_date, end_date)
+        query = self._apply_filters(query, location_id, location_ids, number_plate, vehicle_type, direction, start_date, end_date, hours_ist)
         result = await self.db.execute(query)
         return result.scalar_one()
 
@@ -65,7 +68,7 @@ class AnprRecordRepository(BaseRepository[AnprRecord]):
         result = await self.db.execute(query)
         return [row[0] for row in result.all()]
 
-    def _apply_filters(self, query, location_id, location_ids, number_plate, vehicle_type, direction, start_date, end_date):
+    def _apply_filters(self, query, location_id, location_ids, number_plate, vehicle_type, direction, start_date, end_date, hours_ist=None):
         if location_id:
             query = query.where(AnprRecord.location_id == location_id)
         elif location_ids is not None:
@@ -80,4 +83,9 @@ class AnprRecordRepository(BaseRepository[AnprRecord]):
             query = query.where(AnprRecord.recorded_at >= start_date)
         if end_date:
             query = query.where(AnprRecord.recorded_at <= end_date)
+        # (start_hour, end_hour) restricting rows to those IST hours on EVERY
+        # day the bounds span. None (the default) omits it, leaving every
+        # existing caller's SQL unchanged.
+        if hours_ist:
+            query = query.where(ist_hours_between(AnprRecord.recorded_at, *hours_ist))
         return query

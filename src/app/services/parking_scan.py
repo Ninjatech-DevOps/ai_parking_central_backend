@@ -23,6 +23,7 @@ class ParkingScanService:
         end_date: Optional[datetime] = None,
         interval_minutes: Optional[int] = None,
         camera_id: Optional[uuid.UUID] = None,
+        hours_ist: Optional[tuple] = None,
     ) -> List[ParkingScan]:
         return await self.repo.get_filtered(
             skip=skip,
@@ -33,6 +34,7 @@ class ParkingScanService:
             end_date=end_date,
             interval_minutes=interval_minutes,
             camera_id=camera_id,
+            hours_ist=hours_ist,
         )
 
     async def count_filtered(
@@ -43,6 +45,7 @@ class ParkingScanService:
         end_date: Optional[datetime] = None,
         interval_minutes: Optional[int] = None,
         camera_id: Optional[uuid.UUID] = None,
+        hours_ist: Optional[tuple] = None,
     ) -> int:
         return await self.repo.count_filtered(
             location_id=location_id,
@@ -51,6 +54,7 @@ class ParkingScanService:
             end_date=end_date,
             interval_minutes=interval_minutes,
             camera_id=camera_id,
+            hours_ist=hours_ist,
         )
 
     async def current_occupancy_summary(
@@ -61,6 +65,7 @@ class ParkingScanService:
         until: Optional[datetime] = None,
         camera_id: Optional[uuid.UUID] = None,
         active_cameras_only: bool = False,
+        hours_ist: Optional[tuple] = None,
     ) -> Dict[str, Any]:
         """Current occupancy = each camera's latest scan, summed across scope.
 
@@ -79,6 +84,9 @@ class ParkingScanService:
         `camera_id`: narrow to a single camera (tiles then describe that camera).
         `active_cameras_only`: exclude scans from cameras with is_active=False
             (see ParkingScanRepository.latest_per_location for why this matters).
+        `hours_ist`: (start_hour, end_hour) confining the "latest" pick to those
+            IST hours on every day in range, so the public page reports the last
+            reading of the operating day rather than an overnight one.
         """
         scans = await self.repo.latest_per_location(
             location_id=location_id,
@@ -87,6 +95,7 @@ class ParkingScanService:
             until=until,
             camera_id=camera_id,
             active_cameras_only=active_cameras_only,
+            hours_ist=hours_ist,
         )
         car = {"total": 0, "occupied": 0, "available": 0}
         bike = {"total": 0, "occupied": 0, "available": 0}

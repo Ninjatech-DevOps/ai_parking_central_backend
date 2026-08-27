@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.app.core.constants import VehicleType
 from src.app.models.anpr_session import AnprSession
 from src.app.repositories.base import BaseRepository
+from src.app.utils.timewindow import ist_hours_between
 
 
 class AnprSessionRepository(BaseRepository[AnprSession]):
@@ -39,9 +40,10 @@ class AnprSessionRepository(BaseRepository[AnprSession]):
         end_date: Optional[datetime] = None,
         sort_by: str = "out_time",
         sort_order: str = "desc",
+        hours_ist: Optional[tuple] = None,
     ) -> List[AnprSession]:
         query = select(AnprSession)
-        query = self._apply_filters(query, location_id, location_ids, number_plate, vehicle_type, is_active, start_date, end_date)
+        query = self._apply_filters(query, location_id, location_ids, number_plate, vehicle_type, is_active, start_date, end_date, hours_ist)
         col, direction = self._resolve_sort(sort_by, sort_order)
         # exit_time is nullable (still-parked sessions) -> keep those rows last
         # via NULLS LAST; id is a deterministic tiebreak.
@@ -83,9 +85,10 @@ class AnprSessionRepository(BaseRepository[AnprSession]):
         is_active: Optional[bool] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
+        hours_ist: Optional[tuple] = None,
     ) -> int:
         query = select(func.count()).select_from(AnprSession)
-        query = self._apply_filters(query, location_id, location_ids, number_plate, vehicle_type, is_active, start_date, end_date)
+        query = self._apply_filters(query, location_id, location_ids, number_plate, vehicle_type, is_active, start_date, end_date, hours_ist)
         result = await self.db.execute(query)
         return result.scalar_one()
 
@@ -111,7 +114,7 @@ class AnprSessionRepository(BaseRepository[AnprSession]):
         result = await self.db.execute(query)
         return [{"location_id": r[0], "vehicle_type": r[1], "count": r[2]} for r in result.all()]
 
-    def _apply_filters(self, query, location_id, location_ids, number_plate, vehicle_type, is_active, start_date, end_date):
+    def _apply_filters(self, query, location_id, location_ids, number_plate, vehicle_type, is_active, start_date, end_date, hours_ist=None):
         if location_id:
             query = query.where(AnprSession.location_id == location_id)
         elif location_ids is not None:
@@ -126,4 +129,10 @@ class AnprSessionRepository(BaseRepository[AnprSession]):
             query = query.where(AnprSession.entry_time >= start_date)
         if end_date:
             query = query.where(AnprSession.entry_time <= end_date)
+        # (start_hour, end_hour) restricting rows to those IST hours on EVERY
+        # day the bounds span. Applied to entry_time, matching the bounds above
+        # and how build_inout_chart buckets, so table and chart agree. None (the
+        # default) omits it, leaving every existing caller's SQL unchanged.
+        if hours_ist:
+            query = query.where(ist_hours_between(AnprSession.entry_time, *hours_ist))
         return query

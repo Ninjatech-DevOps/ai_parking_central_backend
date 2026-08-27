@@ -66,6 +66,10 @@ graphify-out/
 # Snapshots
 data/snapshots/
 
+# Cached payloads pulled from a live shared link by scripts/import_live_shared_link.py.
+# Real site data, and re-fetchable at any time -- not something to commit.
+data/live_import/
+
 # Vehicle counter SQLite: ignore the database itself, but keep the directory
 # tracked so a fresh clone has ./data before `docker compose up` runs --
 # otherwise Docker creates the bind-mount target as root and the .db cannot be

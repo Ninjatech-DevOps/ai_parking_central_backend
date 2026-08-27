@@ -6,6 +6,8 @@ PDF export (``parking_history`` route) and the public shared-link view
 """
 from datetime import timedelta
 
+from src.app.utils.timewindow import OP_END_HOUR, OP_START_HOUR
+
 IST = timedelta(hours=5, minutes=30)
 
 
@@ -30,7 +32,7 @@ def _peak_hour_display(hourly: dict) -> tuple:
 
 
 def build_hourly_occupancy(items) -> list:
-    """Hourly occupancy (10 AM - 6 PM), summed across every camera.
+    """Hourly occupancy across the operating window, summed across every camera.
 
     For each hour we pick each CAMERA's busiest scan in that hour, then sum
     those picks across cameras. Picking a single scan per hour across all
@@ -41,7 +43,10 @@ def build_hourly_occupancy(items) -> list:
     ``items`` are ParkingScan ORM rows.
     """
     hourly = []
-    for h in range(10, 19):
+    # Buckets are keyed by their START hour, so the range stops one short of
+    # OP_END_HOUR: with 10..19 that is hours 10-18, covering 10:00-18:59.
+    # Driven by the shared constants so the window is changed in one place.
+    for h in range(OP_START_HOUR, OP_END_HOUR):
         # camera_id -> that camera's busiest scan within this hour
         best_by_cam: dict = {}
         for s in items:

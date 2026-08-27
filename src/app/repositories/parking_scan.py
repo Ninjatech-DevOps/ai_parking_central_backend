@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.app.models.camera import Camera
 from src.app.models.parking_scan import ParkingScan
 from src.app.repositories.base import BaseRepository
+from src.app.utils.timewindow import ist_hours_between
 
 
 class ParkingScanRepository(BaseRepository[ParkingScan]):
@@ -24,15 +25,17 @@ class ParkingScanRepository(BaseRepository[ParkingScan]):
         end_date: Optional[datetime] = None,
         interval_minutes: Optional[int] = None,
         camera_id: Optional[uuid.UUID] = None,
+        hours_ist: Optional[tuple] = None,
     ) -> List[ParkingScan]:
         if interval_minutes and interval_minutes > 0:
             return await self._get_sampled(
                 skip, limit, location_id, location_ids, start_date, end_date,
-                interval_minutes, camera_id=camera_id,
+                interval_minutes, camera_id=camera_id, hours_ist=hours_ist,
             )
         query = select(ParkingScan)
         query = self._apply_filters(
-            query, location_id, location_ids, start_date, end_date, camera_id=camera_id
+            query, location_id, location_ids, start_date, end_date,
+            camera_id=camera_id, hours_ist=hours_ist,
         )
         # id desc as a deterministic tiebreak so rows that share recorded_at
         # (e.g. demo data) order consistently — and the summary's "latest per
@@ -51,6 +54,7 @@ class ParkingScanRepository(BaseRepository[ParkingScan]):
         end_date,
         interval_minutes: int,
         camera_id: Optional[uuid.UUID] = None,
+        hours_ist: Optional[tuple] = None,
     ) -> List[ParkingScan]:
         """Return one row per (camera, time-bucket) using DISTINCT ON.
 
@@ -75,7 +79,8 @@ class ParkingScanRepository(BaseRepository[ParkingScan]):
             .order_by(ParkingScan.camera_id, bucket.desc(), ParkingScan.recorded_at.desc())
         )
         query = self._apply_filters(
-            query, location_id, location_ids, start_date, end_date, camera_id=camera_id
+            query, location_id, location_ids, start_date, end_date,
+            camera_id=camera_id, hours_ist=hours_ist,
         )
 
         # Wrap in subquery to apply skip/limit on the sampled result
@@ -98,6 +103,7 @@ class ParkingScanRepository(BaseRepository[ParkingScan]):
         until: Optional[datetime] = None,
         camera_id: Optional[uuid.UUID] = None,
         active_cameras_only: bool = False,
+        hours_ist: Optional[tuple] = None,
     ) -> List[ParkingScan]:
         """Return the most recent scan for each CAMERA in scope.
 
@@ -143,7 +149,8 @@ class ParkingScanRepository(BaseRepository[ParkingScan]):
                 Camera.is_active.is_(True)
             )
         query = self._apply_filters(
-            query, location_id, location_ids, since, until, camera_id=camera_id
+            query, location_id, location_ids, since, until,
+            camera_id=camera_id, hours_ist=hours_ist,
         )
         result = await self.db.execute(query)
         return list(result.scalars().all())
@@ -156,15 +163,17 @@ class ParkingScanRepository(BaseRepository[ParkingScan]):
         end_date: Optional[datetime] = None,
         interval_minutes: Optional[int] = None,
         camera_id: Optional[uuid.UUID] = None,
+        hours_ist: Optional[tuple] = None,
     ) -> int:
         if interval_minutes and interval_minutes > 0:
             return await self._count_sampled(
                 location_id, location_ids, start_date, end_date,
-                interval_minutes, camera_id=camera_id,
+                interval_minutes, camera_id=camera_id, hours_ist=hours_ist,
             )
         query = select(func.count()).select_from(ParkingScan)
         query = self._apply_filters(
-            query, location_id, location_ids, start_date, end_date, camera_id=camera_id
+            query, location_id, location_ids, start_date, end_date,
+            camera_id=camera_id, hours_ist=hours_ist,
         )
         result = await self.db.execute(query)
         return result.scalar_one()
@@ -177,6 +186,7 @@ class ParkingScanRepository(BaseRepository[ParkingScan]):
         end_date,
         interval_minutes: int,
         camera_id: Optional[uuid.UUID] = None,
+        hours_ist: Optional[tuple] = None,
     ) -> int:
         # Same defensive clamp as _get_sampled — interpolated into raw SQL.
         iv = max(1, min(60, int(interval_minutes)))
@@ -190,14 +200,16 @@ class ParkingScanRepository(BaseRepository[ParkingScan]):
             .order_by(ParkingScan.camera_id, bucket.desc(), ParkingScan.recorded_at.desc())
         )
         query = self._apply_filters(
-            query, location_id, location_ids, start_date, end_date, camera_id=camera_id
+            query, location_id, location_ids, start_date, end_date,
+            camera_id=camera_id, hours_ist=hours_ist,
         )
         count_q = select(func.count()).select_from(query.subquery())
         result = await self.db.execute(count_q)
         return result.scalar_one()
 
     def _apply_filters(
-        self, query, location_id, location_ids, start_date, end_date, camera_id=None
+        self, query, location_id, location_ids, start_date, end_date, camera_id=None,
+        hours_ist=None,
     ):
         # NOTE: this elif is load-bearing — when location_id is given, the
         # caller's location_ids scope set is intentionally ignored. Callers
@@ -215,4 +227,10 @@ class ParkingScanRepository(BaseRepository[ParkingScan]):
             query = query.where(ParkingScan.recorded_at >= start_date)
         if end_date:
             query = query.where(ParkingScan.recorded_at <= end_date)
+        # (start_hour, end_hour) restricting rows to those IST hours on EVERY
+        # day the bounds span — without it a multi-day range runs through the
+        # overnight gaps. None (the default) omits the predicate entirely, so
+        # every existing caller emits exactly the SQL it always did.
+        if hours_ist:
+            query = query.where(ist_hours_between(ParkingScan.recorded_at, *hours_ist))
         return query

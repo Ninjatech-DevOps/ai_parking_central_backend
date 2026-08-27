@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -31,6 +30,7 @@ from src.app.services.shared_link import SharedLinkService
 from src.app.services.anpr_analytics import session_revenue, build_anpr_report
 from src.app.services.parking_analytics import build_parking_report
 from src.app.utils.pagination import build_paginated_response, get_pagination_params
+from src.app.utils.timewindow import OP_END_HOUR, OP_HOURS, operating_window
 
 router = APIRouter(prefix="/public", tags=["Public View"])
 
@@ -45,8 +45,14 @@ def get_shared_link_service(db: AsyncSession = Depends(get_db)) -> SharedLinkSer
     )
 
 
-def _parse_date(date_str: Optional[str]) -> Optional[datetime]:
-    return datetime.fromisoformat(date_str) if date_str else None
+# Every data endpoint below reports the same operating window: 10 AM - 7 PM IST,
+# applied per calendar day. Resolving it once here rather than letting each
+# downstream builder fall back to its own default is what keeps the tables, the
+# cards and the charts on this page describing the same hours.
+#
+# The two surfaces with no time dimension are deliberately excluded: the live
+# canvas (GET /view/{token}) reads current slot state, which has no history to
+# window, and the ANPR dashboard's still-parked summary stays live to match it.
 
 
 @router.get("/view/{token}", response_model=PublicViewResponse)
@@ -74,16 +80,17 @@ async def get_public_parking_history(
 
     repo = ParkingScanRepository(db)
     skip, limit = get_pagination_params(page, page_size)
-    start = _parse_date(start_date)
-    end = _parse_date(end_date)
+    start, end = operating_window(start_date, end_date)
 
     items = await repo.get_filtered(
         skip, limit, location_ids=location_id_set or None,
         start_date=start, end_date=end, interval_minutes=interval_minutes,
+        hours_ist=OP_HOURS,
     )
     total = await repo.count_filtered(
         location_ids=location_id_set or None,
         start_date=start, end_date=end, interval_minutes=interval_minutes,
+        hours_ist=OP_HOURS,
     )
 
     # Shared builder also populates camera_label, which this route previously
@@ -105,14 +112,16 @@ async def get_public_occupancy_summary(
     location_ids = await service._resolve_location_ids(link)
     location_id_set = set(location_ids) if location_ids else set()
 
-    # Report — windowed hourly occupancy (10 AM-6 PM) + summary stats, mirroring
-    # the AI Parking Occupancy PDF. Window defaults to today when unset.
-    start = _parse_date(start_date)
-    end = _parse_date(end_date)
+    # Report — hourly occupancy over the operating window (10 AM - 7 PM IST) +
+    # summary stats, mirroring the AI Parking Occupancy PDF. Window defaults to
+    # today when unset. build_hourly_occupancy already buckets hours 10-18, i.e.
+    # 10:00-18:59, so it needs no argument — it only ever looked wrong because
+    # it was previously handed unfiltered rows.
+    start, end = operating_window(start_date, end_date)
     repo = ParkingScanRepository(db)
     report_items = await repo.get_filtered(
         0, 5000, location_ids=location_id_set or None,
-        start_date=start, end_date=end,
+        start_date=start, end_date=end, hours_ist=OP_HOURS,
     )
     report = build_parking_report(report_items)
 
@@ -121,6 +130,7 @@ async def get_public_occupancy_summary(
     # does not double-count. Same source of truth as the authenticated tiles.
     summary = await ParkingScanService(repo).current_occupancy_summary(
         location_ids=location_id_set or None, since=start, until=end,
+        hours_ist=OP_HOURS,
     )
     car = summary["car"]
     bike = summary["bike"]
@@ -155,18 +165,19 @@ async def get_public_anpr_records(
 
     repo = AnprRecordRepository(db)
     skip, limit = get_pagination_params(page, page_size)
-    start = _parse_date(start_date)
-    end = _parse_date(end_date)
+    start, end = operating_window(start_date, end_date)
 
     items = await repo.get_filtered(
         skip, limit, location_ids=location_id_set or None,
         number_plate=number_plate, vehicle_type=vehicle_type,
         direction=direction, start_date=start, end_date=end,
+        hours_ist=OP_HOURS,
     )
     total = await repo.count_filtered(
         location_ids=location_id_set or None,
         number_plate=number_plate, vehicle_type=vehicle_type,
         direction=direction, start_date=start, end_date=end,
+        hours_ist=OP_HOURS,
     )
 
     response_items = []
@@ -198,18 +209,23 @@ async def get_public_anpr_sessions(
 
     repo = AnprSessionRepository(db)
     skip, limit = get_pagination_params(page, page_size)
-    start = _parse_date(start_date)
-    end = _parse_date(end_date)
+    start, end = operating_window(start_date, end_date)
 
+    # Filtered on entry_time (see AnprSessionRepository._apply_filters), so a
+    # vehicle that arrived before 10 AM is out of scope even if it was still
+    # parked during the window. That matches how build_inout_chart buckets, so
+    # this list and the dashboard's chart always agree.
     items = await repo.get_filtered(
         skip, limit, location_ids=location_id_set or None,
         number_plate=number_plate, vehicle_type=vehicle_type,
         is_active=is_active, start_date=start, end_date=end,
+        hours_ist=OP_HOURS,
     )
     total = await repo.count_filtered(
         location_ids=location_id_set or None,
         number_plate=number_plate, vehicle_type=vehicle_type,
         is_active=is_active, start_date=start, end_date=end,
+        hours_ist=OP_HOURS,
     )
 
     response_items = []
@@ -334,15 +350,22 @@ async def get_public_anpr_dashboard(
             "occupancy_pct": round((occupied / total * 100), 1) if total > 0 else 0,
         })
 
-    # ANPR report — windowed cards (Total/In/Out/Available + Occupancy %,
-    # Revenue Rs, Accuracy %) and charts (In/Out pattern + Duration breakdown),
-    # mirroring the ANPR Sessions PDF. Window defaults to today when unset.
-    start = _parse_date(start_date)
-    end = _parse_date(end_date)
+    # ANPR report — cards (Total/In/Out/Available + Occupancy %, Revenue Rs,
+    # Accuracy %) and charts (In/Out pattern + Duration breakdown) over the
+    # operating window (10 AM - 7 PM IST), mirroring the ANPR Sessions PDF.
+    # Window defaults to today when unset.
+    #
+    # data_end_hour keeps the chart's nine bars (10am ... 6pm) while counting
+    # the full 10 AM - 7 PM day: the "6pm" bar covers 18:00-18:59.
+    start, end = operating_window(start_date, end_date)
     report_items = await AnprSessionRepository(db).get_filtered(
         0, 5000, location_ids=location_id_set, start_date=start, end_date=end,
+        hours_ist=OP_HOURS,
     )
-    report = await build_anpr_report(db, location_id_set, report_items, start, end)
+    report = await build_anpr_report(
+        db, location_id_set, report_items, start, end,
+        hours_ist=OP_HOURS, data_end_hour=OP_END_HOUR,
+    )
 
     return {
         "summary": {
